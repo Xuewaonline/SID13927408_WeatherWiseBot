@@ -116,12 +116,13 @@ def show_sms_send():
     st.title("📱 SMS Notification")
     
     st.subheader("Send Weather Report via SMS")
+    st.caption("Powered by Submail | Domestic: 138xxxxxxxx | Intl: +852xxxxxxxx")
     
     col1, col2 = st.columns(2)
     with col1:
         city = st.text_input("City name", st.session_state.current_city, key="sms_city")
     with col2:
-        phone = st.text_input("Phone number (e.g. +85212345678)", "", key="sms_phone")
+        phone = st.text_input("Phone number", "", key="sms_phone")
     
     col1, col2, col3, col4 = st.columns(4)
     with col1:

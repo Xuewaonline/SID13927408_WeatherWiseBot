@@ -1,52 +1,68 @@
 """
 SMS Service Module
-Uses Twilio API to send weather SMS.
+Uses Submail API to send weather SMS.
 """
 
 import requests
 
-# Twilio Config (fill in your own)
-TWILIO_SID = "AC48868ecb9832a0777758436c57dd4553"
-TWILIO_TOKEN = "9e32487246ab97ad602b8ec9fc2b315c"
-TWILIO_FROM = "+17348212752"
+# ========== Submail Config (fill in your own) ==========
+SUBMAIL_APPID = ""
+SUBMAIL_APPKEY = ""
+
+# API endpoints
+SMS_URL = "https://api-v4.mysubmail.com/sms/send"
+INTL_SMS_URL = "https://api-v4.mysubmail.com/internationalsms/send"
 
 
 def send_sms(to_number, message):
     """
-    Send SMS to a phone number.
+    Send SMS to a phone number using Submail.
     Returns a dict with success status and message.
     """
     # Demo mode if credentials are not set
-    if not TWILIO_SID or not TWILIO_TOKEN or not TWILIO_FROM:
+    if not SUBMAIL_APPID or not SUBMAIL_APPKEY:
         return {
             "success": True,
             "demo": True,
-            "message": "Demo mode - Twilio not configured. SMS preview shown.",
+            "message": "Demo mode - Submail not configured. SMS preview shown.",
             "preview": message
         }
 
-    url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_SID}/Messages.json"
+    # Add SMS signature (required by Submail domestic SMS)
+    content = "【WeatherWiseBot】" + message
+
+    # Choose API: international numbers use + prefix except +86
+    if to_number.startswith("+") and not to_number.startswith("+86"):
+        url = INTL_SMS_URL
+    else:
+        url = SMS_URL
+        # remove +86 prefix for domestic API
+        if to_number.startswith("+86"):
+            to_number = to_number[3:]
+
+    data = {
+        "appid": SUBMAIL_APPID,
+        "signature": SUBMAIL_APPKEY,
+        "to": to_number,
+        "content": content,
+        "sign_type": "normal"
+    }
 
     try:
-        response = requests.post(
-            url,
-            data={"To": to_number, "From": TWILIO_FROM, "Body": message},
-            auth=(TWILIO_SID, TWILIO_TOKEN),
-            timeout=10
-        )
+        response = requests.post(url, data=data, timeout=10)
         result = response.json()
 
-        if response.status_code == 201:
+        if result.get("status") == "success":
             return {
                 "success": True,
                 "demo": False,
-                "message": f"SMS sent! SID: {result.get('sid', 'N/A')}"
+                "message": f"SMS sent! ID: {result.get('send_id', 'N/A')}"
             }
         else:
             return {
                 "success": False,
                 "demo": False,
-                "message": f"Twilio error: {result.get('message', 'Unknown error')}"
+                "message": f"Submail error: {result.get('msg', 'Unknown error')}"
             }
     except Exception as e:
         return {
