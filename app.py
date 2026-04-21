@@ -1,18 +1,15 @@
 """
 WeatherWiseBot - Main Application
-A simple intelligent weather query system
-Built with Streamlit
 
-Run: streamlit run app.py
 """
 
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
 
-# Import weather service module only
+# Import weather service and recommendation modules
 from weather_service import get_weather, get_forecast, check_bad_weather, get_weather_emoji
-
+from recommendation import get_clothing_recommendation, get_forecast_recommendation, format_recommendation_html
 
 # ==================== Page Setup ====================
 
@@ -25,7 +22,6 @@ st.set_page_config(
 # Initialize session state
 if "current_city" not in st.session_state:
     st.session_state.current_city = "Hong Kong"
-
 
 # ==================== Sidebar ====================
 
@@ -48,7 +44,6 @@ for option in nav_options:
 
 page = st.session_state.nav_option.replace("🏠 ", "").replace("🌦️ ", "")
 
-
 # ==================== Home Page ====================
 
 def show_home():
@@ -57,8 +52,8 @@ def show_home():
     st.write("🌷 Your personal weather assistant")
     
     st.markdown("---")
-    
-    # Feature cards with emojis - large titles
+
+    # Feature cards with emojis
     col1, col2, col3 = st.columns(3)
     
     with col1:
@@ -105,6 +100,12 @@ def show_home():
             st.write(f"Feels like: {weather['feels_like']}°C")
             st.write(f"Humidity: {weather['humidity']}%")
             st.write(f"Wind: {weather['wind_speed']} m/s")
+        
+        # Clothing recommendation
+        rec = get_clothing_recommendation(weather)
+        st.markdown("---")
+        st.markdown(f"👔 **Smart Outfit Suggestion**")
+        st.markdown(format_recommendation_html(rec), unsafe_allow_html=True)
 
 
 # ==================== Weather Query Page ====================
@@ -170,6 +171,12 @@ def show_weather_query():
         col3.metric("Wind", f"{weather['wind_speed']} m/s")
         col4.metric("Condition", weather['description'])
         
+        # Clothing recommendation
+        rec = get_clothing_recommendation(weather)
+        st.markdown("---")
+        st.markdown(f"👔 **Smart Outfit Suggestion**")
+        st.markdown(format_recommendation_html(rec), unsafe_allow_html=True)
+        
         # Check for alerts
         if alerts:
             st.error("⚠️ Weather Alerts")
@@ -187,6 +194,7 @@ def show_weather_query():
                     st.write(f"**{day['weekday']}**")
                     st.write(f"{emoji}")
                     st.write(f"{day['temp_max']}° / {day['temp_min']}°")
+                    st.caption(f"👔 {get_forecast_recommendation(day)}")
             
             # Show temperature chart
             chart_data = pd.DataFrame({
