@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 # Import weather service and recommendation modules
 from weather_service import get_weather, get_forecast, check_bad_weather, get_weather_emoji
 from recommendation import get_clothing_recommendation, get_forecast_recommendation, format_recommendation_html
-from sms_service import send_sms, build_weather_sms
+from telegram_service import send_telegram, build_weather_message
 
 # ==================== Page Setup ====================
 
@@ -35,7 +35,7 @@ st.sidebar.markdown("<br><br>", unsafe_allow_html=True)
 if "nav_option" not in st.session_state:
     st.session_state.nav_option = "🏠 Home"
 
-nav_options = ["🏠 Home", "🌦️ Weather Query", "📱 SMS Send"]
+nav_options = ["🏠 Home", "🌦️ Weather Query", "📱 Telegram Push"]
 
 for option in nav_options:
     if st.sidebar.button(option, use_container_width=True, 
@@ -68,9 +68,9 @@ def show_home():
         st.write("🧥 Get clothing suggestions based on weather")
     
     with col3:
-        st.markdown("<h5 style='text-align: left; margin-bottom: 0.3rem;'>📱 SMS Notification</h4>", unsafe_allow_html=True)
+        st.markdown("<h5 style='text-align: left; margin-bottom: 0.3rem;'>📱 Telegram Notification</h4>", unsafe_allow_html=True)
         st.markdown("<p style='text-align: left; font-size: 1.25em; color: #555; font-weight: 500; margin-top: 0;'>Instant</p>", unsafe_allow_html=True)
-        st.write("📤 Send weather info via SMS instantly")
+        st.write("📤 Send weather info via Telegram instantly")
     
     st.markdown("---")
     
@@ -109,20 +109,20 @@ def show_home():
         st.markdown(format_recommendation_html(rec), unsafe_allow_html=True)
 
 
-# ==================== SMS Send Page ====================
+# ==================== Telegram Push Page ====================
 
-def show_sms_send():
-    """Display SMS send page"""
-    st.title("📱 SMS Notification")
+def show_telegram_send():
+    """Display Telegram push page"""
+    st.title("📱 Telegram Notification")
     
-    st.subheader("Send Weather Report via SMS")
-    st.caption("Powered by Submail | Domestic: 138xxxxxxxx | Intl: +852xxxxxxxx")
+    st.subheader("Send Weather Report via Telegram")
+    st.caption("Powered by Telegram Bot API | Enter your Chat ID")
     
     col1, col2 = st.columns(2)
     with col1:
-        city = st.text_input("City name", st.session_state.current_city, key="sms_city")
+        city = st.text_input("City name", st.session_state.current_city, key="telegram_city")
     with col2:
-        phone = st.text_input("Phone number", "", key="sms_phone")
+        chat_id = st.text_input("Telegram Chat ID", "", key="telegram_chat_id")
     
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -134,9 +134,9 @@ def show_sms_send():
     with col4:
         include_alerts = st.checkbox("Weather alerts", True)
     
-    if st.button("📤 Send SMS", type="primary"):
-        if not phone.strip():
-            st.error("Please enter a phone number.")
+    if st.button("📤 Send Telegram", type="primary"):
+        if not chat_id.strip():
+            st.error("Please enter a Telegram Chat ID.")
             return
         
         weather = get_weather(city)
@@ -152,9 +152,9 @@ def show_sms_send():
             st.warning("Please select at least one item to send.")
             return
         
-        # Build and send SMS
-        sms_text = build_weather_sms(weather, forecast, alerts, rec, include_weather)
-        result = send_sms(phone, sms_text)
+        # Build and send Telegram message
+        message_text = build_weather_message(weather, forecast, alerts, rec, include_weather)
+        result = send_telegram(chat_id, message_text)
         
         if result["success"]:
             if result.get("demo"):
@@ -269,8 +269,8 @@ if page == "Home":
     show_home()
 elif page == "Weather Query":
     show_weather_query()
-elif page == "SMS Send":
-    show_sms_send()
+elif page == "Telegram Push":
+    show_telegram_send()
 
 # Footer
 
