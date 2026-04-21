@@ -3,13 +3,9 @@ SMS Service Module
 Uses Twilio API to send weather SMS.
 """
 
-import urllib.request
-import urllib.parse
-import base64
-import json
-import ssl
+import requests
 
-# ========== Twilio Config (fill in your own) ==========
+# Twilio Config (fill in your own)
 TWILIO_SID = "AC48868ecb9832a0777758436c57dd4553"
 TWILIO_TOKEN = "9e32487246ab97ad602b8ec9fc2b315c"
 TWILIO_FROM = "+17348212752"
@@ -25,34 +21,32 @@ def send_sms(to_number, message):
         return {
             "success": True,
             "demo": True,
-            "message": "Demo mode — Twilio not configured. SMS preview shown.",
+            "message": "Demo mode - Twilio not configured. SMS preview shown.",
             "preview": message
         }
 
     url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_SID}/Messages.json"
 
-    data = urllib.parse.urlencode({
-        "To": to_number,
-        "From": TWILIO_FROM,
-        "Body": message
-    }).encode()
-
-    auth = base64.b64encode(f"{TWILIO_SID}:{TWILIO_TOKEN}".encode()).decode()
-
-    req = urllib.request.Request(url, data=data, method="POST")
-    req.add_header("Authorization", f"Basic {auth}")
-
     try:
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
+        response = requests.post(
+            url,
+            data={"To": to_number, "From": TWILIO_FROM, "Body": message},
+            auth=(TWILIO_SID, TWILIO_TOKEN),
+            timeout=10
+        )
+        result = response.json()
 
-        with urllib.request.urlopen(req, context=ctx) as response:
-            result = json.loads(response.read().decode())
+        if response.status_code == 201:
             return {
                 "success": True,
                 "demo": False,
                 "message": f"SMS sent! SID: {result.get('sid', 'N/A')}"
+            }
+        else:
+            return {
+                "success": False,
+                "demo": False,
+                "message": f"Twilio error: {result.get('message', 'Unknown error')}"
             }
     except Exception as e:
         return {
@@ -62,16 +56,17 @@ def send_sms(to_number, message):
         }
 
 
-def build_weather_sms(weather, forecast=None, alerts=None, rec=None):
+def build_weather_sms(weather, forecast=None, alerts=None, rec=None, include_weather=True):
     """
     Build a weather report SMS text from weather data.
     """
-    lines = [
-        f"Weather in {weather['city']}:",
-        f"Temp: {weather['temp']}C (feels like {weather['feels_like']}C)",
-        f"Condition: {weather['description']}",
-        f"Humidity: {weather['humidity']}%, Wind: {weather['wind_speed']}m/s"
-    ]
+    lines = []
+
+    if include_weather:
+        lines.append(f"Weather in {weather['city']}:")
+        lines.append(f"Temp: {weather['temp']}C (feels like {weather['feels_like']}C)")
+        lines.append(f"Condition: {weather['description']}")
+        lines.append(f"Humidity: {weather['humidity']}%, Wind: {weather['wind_speed']}m/s")
 
     if rec and rec.get("items"):
         lines.append(f"Outfit: {', '.join(rec['items'][:3])}")

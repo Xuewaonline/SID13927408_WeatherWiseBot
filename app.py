@@ -43,7 +43,7 @@ for option in nav_options:
         st.session_state.nav_option = option
         st.rerun()
 
-page = st.session_state.nav_option.replace("🏠 ", "").replace("🌦️ ", "")
+page = st.session_state.nav_option.replace("🏠 ", "").replace("🌦️ ", "").replace("📱 ", "")
 
 # ==================== Home Page ====================
 
@@ -152,7 +152,7 @@ def show_sms_send():
             return
         
         # Build and send SMS
-        sms_text = build_weather_sms(weather, forecast, alerts, rec)
+        sms_text = build_weather_sms(weather, forecast, alerts, rec, include_weather)
         result = send_sms(phone, sms_text)
         
         if result["success"]:
