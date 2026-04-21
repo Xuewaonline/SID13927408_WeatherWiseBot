@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 # Import weather service and recommendation modules
 from weather_service import get_weather, get_forecast, check_bad_weather, get_weather_emoji
 from recommendation import get_clothing_recommendation, get_forecast_recommendation, format_recommendation_html
+from sms_service import send_sms, build_weather_sms
 
 # ==================== Page Setup ====================
 
@@ -34,7 +35,7 @@ st.sidebar.markdown("<br><br>", unsafe_allow_html=True)
 if "nav_option" not in st.session_state:
     st.session_state.nav_option = "🏠 Home"
 
-nav_options = ["🏠 Home", "🌦️ Weather Query"]
+nav_options = ["🏠 Home", "🌦️ Weather Query", "📱 SMS Send"]
 
 for option in nav_options:
     if st.sidebar.button(option, use_container_width=True, 
@@ -106,6 +107,62 @@ def show_home():
         st.markdown("---")
         st.markdown(f"👔 **Smart Outfit Suggestion**")
         st.markdown(format_recommendation_html(rec), unsafe_allow_html=True)
+
+
+# ==================== SMS Send Page ====================
+
+def show_sms_send():
+    """Display SMS send page"""
+    st.title("📱 SMS Notification")
+    
+    st.subheader("Send Weather Report via SMS")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        city = st.text_input("City name", st.session_state.current_city, key="sms_city")
+    with col2:
+        phone = st.text_input("Phone number (e.g. +85212345678)", "", key="sms_phone")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        include_weather = st.checkbox("Current weather", True)
+    with col2:
+        include_forecast = st.checkbox("3-day forecast", True)
+    with col3:
+        include_outfit = st.checkbox("Outfit tip", True)
+    with col4:
+        include_alerts = st.checkbox("Weather alerts", True)
+    
+    if st.button("📤 Send SMS", type="primary"):
+        if not phone.strip():
+            st.error("Please enter a phone number.")
+            return
+        
+        weather = get_weather(city)
+        if weather is None:
+            st.error(f"City '{city}' not found.")
+            return
+        
+        forecast = get_forecast(city) if include_forecast else []
+        alerts = check_bad_weather(city) if include_alerts else []
+        rec = get_clothing_recommendation(weather) if include_outfit else None
+        
+        if not include_weather and not include_forecast and not include_outfit and not include_alerts:
+            st.warning("Please select at least one item to send.")
+            return
+        
+        # Build and send SMS
+        sms_text = build_weather_sms(weather, forecast, alerts, rec)
+        result = send_sms(phone, sms_text)
+        
+        if result["success"]:
+            if result.get("demo"):
+                st.info(f"📝 {result['message']}")
+                st.code(result["preview"])
+            else:
+                st.success(result["message"])
+        else:
+            st.error(result["message"])
 
 
 # ==================== Weather Query Page ====================
@@ -211,6 +268,8 @@ if page == "Home":
     show_home()
 elif page == "Weather Query":
     show_weather_query()
+elif page == "SMS Send":
+    show_sms_send()
 
 # Footer
 
