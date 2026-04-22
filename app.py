@@ -116,7 +116,7 @@ def show_telegram_send():
     st.title("📱 Telegram Notification")
     
     st.subheader("Send Weather Report via Telegram")
-    st.caption("Powered by Telegram Bot API | Enter your Chat ID")
+    st.caption("Powered by Telegram @weatherwise_yukibot")
     
     col1, col2 = st.columns(2)
     with col1:
