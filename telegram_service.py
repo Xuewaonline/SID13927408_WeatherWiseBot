@@ -11,7 +11,6 @@ TELEGRAM_BOT_TOKEN = "8607118945:AAGuBqszWuN3N-4gtSkU3nQjzA3fCosnYaA"
 def send_telegram(chat_id, message):
     """
     Send message to a Telegram chat using Bot API.
-    Returns a dict with success status and message.
     """
     # Demo mode if token is not set
     if not TELEGRAM_BOT_TOKEN:

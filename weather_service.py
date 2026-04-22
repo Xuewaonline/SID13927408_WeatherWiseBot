@@ -55,12 +55,6 @@ def get_weather(city):
 def get_forecast(city):
     """
     Get 5-day weather forecast for a city
-    
-    Args:
-        city: city name in English (case insensitive)
-    
-    Returns:
-        list of daily forecasts, or empty list if city not found
     """
     city = city.strip().title()
     url = "https://api.openweathermap.org/data/2.5/forecast"
@@ -116,12 +110,6 @@ def get_forecast(city):
 def check_bad_weather(city):
     """
     Check for severe weather alerts
-    
-    Args:
-        city: city name in English (case insensitive)
-    
-    Returns:
-        list of alerts (empty if no alerts or city not found)
     """
     city = city.strip().title()
     weather = get_weather(city)
@@ -168,14 +156,6 @@ def check_bad_weather(city):
 def http_get_json(url, params=None, timeout=10):
     """
     Send HTTP GET request and return JSON data
-    
-    Args:
-        url: API endpoint URL
-        params: dict of query parameters
-        timeout: request timeout in seconds
-    
-    Returns:
-        parsed JSON data as dict
     """
     # Add parameters to URL if provided
     if params:
@@ -203,12 +183,6 @@ def http_get_json(url, params=None, timeout=10):
 def get_weekday_name(date_string):
     """
     Convert date string to weekday name
-    
-    Args:
-        date_string: date in format "2024-04-08"
-    
-    Returns:
-        weekday name like "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"
     """
     weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
     date = datetime.strptime(date_string, "%Y-%m-%d")
@@ -218,12 +192,6 @@ def get_weekday_name(date_string):
 def get_weather_emoji(weather_main):
     """
     Get emoji for weather condition
-    
-    Args:
-        weather_main: main weather condition like "Clear", "Rain"
-    
-    Returns:
-        emoji string
     """
     emojis = {
         "Clear": "☀️",
