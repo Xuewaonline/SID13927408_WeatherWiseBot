@@ -6,11 +6,11 @@ WeatherWiseBot - Main Application
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
-
 # Import weather service and recommendation modules
 from weather_service import get_weather, get_forecast, check_bad_weather, get_weather_emoji
 from recommendation import get_clothing_recommendation, get_forecast_recommendation, format_recommendation_html
 from telegram_service import send_telegram, build_weather_message
+from trip_weatherpush_service import send_trip_weather_report, start_scheduled_push, stop_scheduled_push
 
 # ==================== Page Setup ====================
 
@@ -35,7 +35,7 @@ st.sidebar.markdown("<br><br>", unsafe_allow_html=True)
 if "nav_option" not in st.session_state:
     st.session_state.nav_option = "🏠 Home"
 
-nav_options = ["🏠 Home", "🌦️ Weather Query", "📱 Telegram Push"]
+nav_options = ["🏠 Home", "🌦️ Weather Query", "📱 Telegram Push", "🚗 Trip Weather Push"]
 
 for option in nav_options:
     if st.sidebar.button(option, use_container_width=True, 
@@ -43,7 +43,7 @@ for option in nav_options:
         st.session_state.nav_option = option
         st.rerun()
 
-page = st.session_state.nav_option.replace("🏠 ", "").replace("🌦️ ", "").replace("📱 ", "")
+page = st.session_state.nav_option.replace("🏠 ", "").replace("🌦️ ", "").replace("📱 ", "").replace("🚗 ", "")
 
 # ==================== Home Page ====================
 
@@ -166,6 +166,98 @@ def show_telegram_send():
             st.error(result["message"])
 
 
+# ==================== Trip Weather Push Page ====================
+
+def show_trip_weather():
+    """Display trip weather push page (UI only — logic delegated to trip_weatherpush_service)"""
+    st.title("🚗 Trip Weather Push")
+
+    # ---------- Instant Push ----------
+    st.subheader("Instant Trip Weather Report")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        departure_city = st.text_input("Departure City", "", key="trip_dep_city")
+        departure_time = st.datetime_input(
+            "Departure Time",
+            value=datetime.now(),
+            key="trip_dep_time"
+        )
+    with col2:
+        arrival_city = st.text_input("Arrival City", "", key="trip_arr_city")
+        arrival_time = st.datetime_input(
+            "Arrival Time",
+            value=datetime.now() + timedelta(hours=2),
+            key="trip_arr_time"
+        )
+
+    trip_chat_id = st.text_input("Telegram Chat ID", "", key="trip_chat_id")
+
+    if st.button("📤 Send Weather Report", type="primary"):
+        if not trip_chat_id.strip():
+            st.error("Please enter a Telegram Chat ID.")
+            return
+        if not departure_city.strip() or not arrival_city.strip():
+            st.error("Please enter both departure and arrival cities.")
+            return
+
+        result = send_trip_weather_report(
+            trip_chat_id, departure_city, departure_time, arrival_city, arrival_time
+        )
+
+        if result["success"]:
+            if result.get("demo"):
+                st.info(f"📝 {result['message']}")
+                st.code(result["preview"])
+            else:
+                st.success(result["message"])
+        else:
+            st.error(result["message"])
+
+    # ---------- Scheduled Push ----------
+    st.markdown("---")
+    st.subheader("Scheduled Trip Weather Push")
+
+    sched_chat_id = st.text_input("Telegram Chat ID", "", key="sched_chat_id")
+    sched_dep_city = st.text_input("Departure City", "", key="sched_dep_city")
+    sched_arr_city = st.text_input("Arrival City", "", key="sched_arr_city")
+
+    default_time = datetime.strptime("08:00", "%H:%M").time()
+    push_time = st.time_input("Daily Push Time", value=default_time, key="push_time")
+
+    if "scheduled_push_active" not in st.session_state:
+        st.session_state.scheduled_push_active = False
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("▶️ Start Scheduled Push", type="primary"):
+            if st.session_state.scheduled_push_active:
+                st.warning("Scheduled push is already running!")
+            else:
+                if not sched_chat_id.strip():
+                    st.error("Please enter a Telegram Chat ID.")
+                elif not sched_dep_city.strip() or not sched_arr_city.strip():
+                    st.error("Please enter both departure and arrival cities.")
+                else:
+                    start_scheduled_push(
+                        st.session_state, sched_chat_id, sched_dep_city, sched_arr_city, push_time
+                    )
+                    st.success(f"Scheduled push started! Will push daily at {push_time.strftime('%H:%M')}.")
+                    st.rerun()
+
+    with col2:
+        if st.button("⏹️ Stop Scheduled Push", type="secondary"):
+            if st.session_state.scheduled_push_active:
+                stop_scheduled_push(st.session_state)
+                st.success("Scheduled push stopped.")
+                st.rerun()
+            else:
+                st.info("No scheduled push is currently running.")
+
+    if st.session_state.scheduled_push_active:
+        st.info(f"⏰ Scheduled push is ACTIVE — daily at **{push_time.strftime('%H:%M')}** to Chat ID: `{sched_chat_id}`")
+
+
 # ==================== Weather Query Page ====================
 
 def show_weather_query():
@@ -271,6 +363,8 @@ elif page == "Weather Query":
     show_weather_query()
 elif page == "Telegram Push":
     show_telegram_send()
+elif page == "Trip Weather Push":
+    show_trip_weather()
 
 # Footer
 
