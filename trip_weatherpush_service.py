@@ -1,6 +1,5 @@
 """
 Trip Weather Push Service Module
-Handles trip weather report generation and push logic.
 """
 
 from datetime import datetime
@@ -9,11 +8,9 @@ from weather_service import get_weather
 from recommendation import get_clothing_recommendation
 from telegram_service import send_telegram
 
-
 # ==================== Message Builder ====================
 
 def build_trip_weather_message(dep_weather, dep_rec, dep_time, arr_weather, arr_rec, arr_time):
-    """Build a trip weather report message for Telegram."""
     lines = []
     lines.append("🚗 Trip Weather Report")
     lines.append("")

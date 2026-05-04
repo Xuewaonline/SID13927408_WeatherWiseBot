@@ -24,7 +24,7 @@ def send_telegram(chat_id, message):
     if not chat_id:
         return {
             "success": False,
-            "message": "Please enter a Telegram Chat ID."
+            "message": "Please enter a Telegram ID."
         }
 
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"

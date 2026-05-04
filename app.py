@@ -122,7 +122,7 @@ def show_telegram_send():
     with col1:
         city = st.text_input("City name", st.session_state.current_city, key="telegram_city")
     with col2:
-        chat_id = st.text_input("Telegram Chat ID", "", key="telegram_chat_id")
+        chat_id = st.text_input("Telegram ID", "", key="telegram_chat_id")
     
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -136,7 +136,7 @@ def show_telegram_send():
     
     if st.button("📤 Send Telegram", type="primary"):
         if not chat_id.strip():
-            st.error("Please enter a Telegram Chat ID.")
+            st.error("Please enter a Telegram ID.")
             return
         
         weather = get_weather(city)
@@ -191,11 +191,11 @@ def show_trip_weather():
             key="trip_arr_time"
         )
 
-    trip_chat_id = st.text_input("Telegram Chat ID", "", key="trip_chat_id")
+    trip_chat_id = st.text_input("Telegram ID", "", key="trip_chat_id")
 
     if st.button("📤 Send Weather Report", type="primary"):
         if not trip_chat_id.strip():
-            st.error("Please enter a Telegram Chat ID.")
+            st.error("Please enter a Telegram ID.")
             return
         if not departure_city.strip() or not arrival_city.strip():
             st.error("Please enter both departure and arrival cities.")
