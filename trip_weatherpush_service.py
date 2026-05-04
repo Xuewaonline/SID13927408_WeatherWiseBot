@@ -1,10 +1,8 @@
 """
 Trip Weather Push Service Module
-Handles trip weather report generation and scheduled push logic.
+Handles trip weather report generation and push logic.
 """
 
-import threading
-import time
 from datetime import datetime
 
 from weather_service import get_weather
@@ -41,44 +39,6 @@ def build_trip_weather_message(dep_weather, dep_rec, dep_time, arr_weather, arr_
 
     return "\n".join(lines)
 
-
-# ==================== Scheduled Push Worker ====================
-
-def scheduled_push_worker(session_state_ref, chat_id, dep_city, arr_city, push_time):
-    """
-    Background worker for scheduled daily trip weather push.
-    
-    Args:
-        session_state_ref: A dict-like object (e.g., st.session_state) to read 'scheduled_push_active'.
-        chat_id: Telegram Chat ID.
-        dep_city: Departure city name.
-        arr_city: Arrival city name.
-        push_time: datetime.time object specifying when to push each day.
-    """
-    while session_state_ref.get("scheduled_push_active", False):
-        now = datetime.now()
-        # Check if current time matches push time (within same minute)
-        if now.hour == push_time.hour and now.minute == push_time.minute:
-            try:
-                dep_weather = get_weather(dep_city)
-                arr_weather = get_weather(arr_city)
-
-                if dep_weather and arr_weather:
-                    dep_rec = get_clothing_recommendation(dep_weather)
-                    arr_rec = get_clothing_recommendation(arr_weather)
-
-                    message = build_trip_weather_message(
-                        dep_weather, dep_rec, now,
-                        arr_weather, arr_rec, now
-                    )
-                    send_telegram(chat_id, message)
-            except Exception as e:
-                print(f"Scheduled push error: {e}")
-
-            # Sleep 61 seconds to avoid duplicate sends in the same minute
-            time.sleep(61)
-        else:
-            time.sleep(30)
 
 
 # ==================== Instant Push Service ====================
@@ -120,25 +80,3 @@ def send_trip_weather_report(chat_id, departure_city, departure_time, arrival_ci
     return send_telegram(chat_id, message)
 
 
-# ==================== Scheduled Push Controller ====================
-
-def start_scheduled_push(session_state_ref, chat_id, dep_city, arr_city, push_time):
-    """
-    Start a background thread for scheduled daily trip weather push.
-    
-    Returns:
-        threading.Thread: The started daemon thread.
-    """
-    session_state_ref["scheduled_push_active"] = True
-    thread = threading.Thread(
-        target=scheduled_push_worker,
-        args=(session_state_ref, chat_id, dep_city, arr_city, push_time),
-        daemon=True
-    )
-    thread.start()
-    return thread
-
-
-def stop_scheduled_push(session_state_ref):
-    """Stop the scheduled push by setting the active flag to False."""
-    session_state_ref["scheduled_push_active"] = False
