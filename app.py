@@ -11,6 +11,7 @@ from weather_service import get_weather, get_forecast, check_bad_weather, get_we
 from recommendation import get_clothing_recommendation, get_forecast_recommendation, format_recommendation_html
 from telegram_service import send_telegram, build_weather_message
 from trip_weatherpush_service import send_trip_weather_report
+from user_service import register_or_login, get_user, update_user
 
 # ==================== Page Setup ====================
 
@@ -24,10 +25,38 @@ st.set_page_config(
 if "current_city" not in st.session_state:
     st.session_state.current_city = "Hong Kong"
 
+if "logged_in_user" not in st.session_state:
+    st.session_state.logged_in_user = None
+
 # ==================== Sidebar ====================
 
 st.sidebar.markdown("<div style='margin-top: 2rem;'></div>", unsafe_allow_html=True)
 st.sidebar.markdown("<h1 style='text-align: center; margin: 0; font-size: 1.8rem;'>🌤️<br>WeatherWiseBot</h1>", unsafe_allow_html=True)
+
+# Login section in sidebar
+st.sidebar.markdown("<br>", unsafe_allow_html=True)
+st.sidebar.markdown("**👤 Account**")
+
+if st.session_state.logged_in_user:
+    user = st.session_state.logged_in_user
+    display_name = user.get("nickname") or user["telegram_id"]
+    st.sidebar.success(f"👋 {display_name}")
+    if st.sidebar.button("🚪 Logout"):
+        st.session_state.logged_in_user = None
+        st.rerun()
+else:
+    with st.sidebar.expander("Login with Telegram ID"):
+        login_id = st.text_input("Telegram ID", key="login_telegram_id")
+        if st.button("Login", key="login_btn"):
+            if login_id.strip():
+                user = register_or_login(login_id)
+                if user:
+                    st.session_state.logged_in_user = user
+                    if user.get("favorite_city"):
+                        st.session_state.current_city = user["favorite_city"]
+                    st.rerun()
+            else:
+                st.error("Please enter your Telegram ID")
 
 # Navigation menu with emojis and larger font
 st.sidebar.markdown("<br><br>", unsafe_allow_html=True)
@@ -35,7 +64,7 @@ st.sidebar.markdown("<br><br>", unsafe_allow_html=True)
 if "nav_option" not in st.session_state:
     st.session_state.nav_option = "🏠 Home"
 
-nav_options = ["🏠 Home", "🌦️ Weather Query", "📱 Telegram Push", "🚗 Trip Weather Push"]
+nav_options = ["🏠 Home", "🌦️ Weather Query", "📱 Telegram Push", "🚗 Trip Weather Push", "👤 Account"]
 
 for option in nav_options:
     if st.sidebar.button(option, use_container_width=True, 
@@ -43,7 +72,7 @@ for option in nav_options:
         st.session_state.nav_option = option
         st.rerun()
 
-page = st.session_state.nav_option.replace("🏠 ", "").replace("🌦️ ", "").replace("📱 ", "").replace("🚗 ", "")
+page = st.session_state.nav_option.replace("🏠 ", "").replace("🌦️ ", "").replace("📱 ", "").replace("🚗 ", "").replace("👤 ", "")
 
 # ==================== Home Page ====================
 
@@ -114,15 +143,20 @@ def show_home():
 def show_telegram_send():
     """Display Telegram push page"""
     st.title("📱 Telegram Notification")
-    
+
     st.subheader("Send Weather Report via Telegram")
     st.caption("Powered by Telegram @weatherwise_yukibot")
-    
+
+    # Auto-fill telegram ID if logged in
+    default_chat_id = ""
+    if st.session_state.logged_in_user:
+        default_chat_id = st.session_state.logged_in_user["telegram_id"]
+
     col1, col2 = st.columns(2)
     with col1:
         city = st.text_input("City name", st.session_state.current_city, key="telegram_city")
     with col2:
-        chat_id = st.text_input("Telegram ID", "", key="telegram_chat_id")
+        chat_id = st.text_input("Telegram ID", default_chat_id, key="telegram_chat_id")
     
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -169,7 +203,6 @@ def show_telegram_send():
 # ==================== Trip Weather Push Page ====================
 
 def show_trip_weather():
-    """Display trip weather push page (UI only — logic delegated to trip_weatherpush_service)"""
     st.title("🚗 Trip Weather Push")
 
     # ---------- Instant Push ----------
@@ -191,7 +224,12 @@ def show_trip_weather():
             key="trip_arr_time"
         )
 
-    trip_chat_id = st.text_input("Telegram ID", "", key="trip_chat_id")
+    # Auto-fill telegram ID if logged in
+    default_trip_id = ""
+    if st.session_state.logged_in_user:
+        default_trip_id = st.session_state.logged_in_user["telegram_id"]
+
+    trip_chat_id = st.text_input("Telegram ID", default_trip_id, key="trip_chat_id")
 
     if st.button("📤 Send Weather Report", type="primary"):
         if not trip_chat_id.strip():
@@ -314,6 +352,53 @@ def show_weather_query():
             st.line_chart(chart_data.set_index('Day'))
 
 
+# ==================== Account Page ====================
+
+def show_account():
+    """Display user account and preferences page."""
+    st.title("👤 My Account")
+
+    if not st.session_state.logged_in_user:
+        st.info("Please login from the sidebar to manage your account.")
+        return
+
+    user = st.session_state.logged_in_user
+    st.success(f"Logged in as: **{user['telegram_id']}**")
+
+    st.subheader("Profile Settings")
+
+    # Nickname
+    current_nickname = user.get("nickname", "")
+    nickname = st.text_input("Nickname", value=current_nickname, key="account_nickname")
+
+    # Favorite city
+    current_city = user.get("favorite_city", "Hong Kong")
+    favorite_city = st.text_input("Preferred City", value=current_city, key="account_city")
+
+    if st.button("💾 Save Preferences", type="primary"):
+        update_user(
+            user["telegram_id"],
+            nickname=nickname.strip(),
+            favorite_city=favorite_city.strip()
+        )
+        # Refresh session state
+        updated = get_user(user["telegram_id"])
+        st.session_state.logged_in_user = updated
+        if favorite_city.strip():
+            st.session_state.current_city = favorite_city.strip()
+        st.success("Preferences saved!")
+        st.rerun()
+
+    st.markdown("---")
+    st.subheader("Current Preferences")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.write(f"**Telegram ID:** {user['telegram_id']}")
+        st.write(f"**Nickname:** {user.get('nickname') or 'Not set'}")
+    with col2:
+        st.write(f"**Preferred City:** {user.get('favorite_city') or 'Hong Kong'}")
+
+
 # ==================== Page Router ====================
 
 if page == "Home":
@@ -324,6 +409,8 @@ elif page == "Telegram Push":
     show_telegram_send()
 elif page == "Trip Weather Push":
     show_trip_weather()
+elif page == "Account":
+    show_account()
 
 # Footer
 

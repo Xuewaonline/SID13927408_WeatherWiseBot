@@ -41,12 +41,7 @@ def build_trip_weather_message(dep_weather, dep_rec, dep_time, arr_weather, arr_
 # ==================== Instant Push Service ====================
 
 def send_trip_weather_report(chat_id, departure_city, departure_time, arrival_city, arrival_time):
-    """
-    Fetch weather for departure and arrival cities, build trip report, and send via Telegram.
-    
-    Returns:
-        dict: {"success": bool, "message": str, "preview": str (optional)}
-    """
+
     # Fetch departure weather
     dep_weather = get_weather(departure_city)
     if dep_weather is None:
