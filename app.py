@@ -11,10 +11,7 @@ from weather_service import get_weather, get_forecast, check_bad_weather, get_we
 from recommendation import get_clothing_recommendation, get_forecast_recommendation, format_recommendation_html
 from telegram_service import send_telegram, build_weather_message
 from trip_weatherpush_service import send_trip_weather_report
-from user_service import (
-    register_or_login, get_user, update_user,
-    add_saved_account, get_saved_accounts, update_saved_account, delete_saved_account,
-)
+from user_service import register_or_login, get_user, update_user
 
 # ==================== Page Setup ====================
 
@@ -56,7 +53,6 @@ if st.session_state.logged_in_user:
     st.sidebar.success(f"👋 {display_name}")
     if st.sidebar.button("🚪 Logout"):
         st.session_state.logged_in_user = None
-        st.session_state.pop("active_account", None)
         st.query_params.pop("login_tid", None)
         st.rerun()
 else:
@@ -163,11 +159,9 @@ def show_telegram_send():
     st.subheader("Send Weather Report via Telegram")
     st.caption("Powered by Telegram @weatherwise_yukibot")
 
-    # Auto-fill telegram ID and city from switched sub-account
+    # Auto-fill telegram ID if logged in
     default_chat_id = ""
-    if st.session_state.get("active_account"):
-        default_chat_id = st.session_state.active_account["tid"]
-    elif st.session_state.logged_in_user:
+    if st.session_state.logged_in_user:
         default_chat_id = st.session_state.logged_in_user["telegram_id"]
 
     col1, col2 = st.columns(2)
@@ -242,11 +236,9 @@ def show_trip_weather():
             key="trip_arr_time"
         )
 
-    # Auto-fill telegram ID from switched sub-account
+    # Auto-fill telegram ID if logged in
     default_trip_id = ""
-    if st.session_state.get("active_account"):
-        default_trip_id = st.session_state.active_account["tid"]
-    elif st.session_state.logged_in_user:
+    if st.session_state.logged_in_user:
         default_trip_id = st.session_state.logged_in_user["telegram_id"]
 
     trip_chat_id = st.text_input("Telegram ID", default_trip_id, key="trip_chat_id")
@@ -385,16 +377,15 @@ def show_account():
     user = st.session_state.logged_in_user
     st.success(f"Logged in as: **{user['telegram_id']}**")
 
-    # ---------- Profile Settings ----------
     st.subheader("Profile Settings")
 
     current_nickname = user.get("nickname", "")
     nickname = st.text_input("Nickname", value=current_nickname, key="account_nickname")
 
     current_city = user.get("favorite_city", "Hong Kong")
-    favorite_city = st.text_input("My Preferred City", value=current_city, key="account_city")
+    favorite_city = st.text_input("Preferred City", value=current_city, key="account_city")
 
-    if st.button("💾 Save Profile", type="primary"):
+    if st.button("💾 Save", type="primary"):
         update_user(
             user["telegram_id"],
             nickname=nickname.strip(),
@@ -404,84 +395,8 @@ def show_account():
         st.session_state.logged_in_user = updated
         if favorite_city.strip():
             st.session_state.current_city = favorite_city.strip()
-        st.success("Profile saved!")
+        st.success("Saved!")
         st.rerun()
-
-    st.markdown("---")
-
-    # ---------- Saved Accounts (常用账户) ----------
-    st.subheader("📒 Saved Accounts")
-    st.caption("Add frequently used Telegram accounts with their preferred cities. "
-               "They will be available for quick selection across the app.")
-
-    saved = get_saved_accounts(user["telegram_id"])
-
-    # Display existing saved accounts
-    if saved:
-        for acct in saved:
-            with st.container():
-                col1, col2, col3, col4 = st.columns([3, 3, 2, 1])
-                with col1:
-                    st.write(f"**{acct['account_name']}**")
-                with col2:
-                    st.write(f"ID: `{acct['account_telegram_id']}`")
-                with col3:
-                    st.write(f"City: {acct['preferred_city']}")
-                with col4:
-                    if st.button("🗑️", key=f"del_acct_{acct['id']}"):
-                        delete_saved_account(acct["id"])
-                        st.success(f"Deleted '{acct['account_name']}'")
-                        st.rerun()
-
-        st.markdown("---")
-
-    # Add new saved account form
-    with st.expander("➕ Add New Account"):
-        a_name = st.text_input("Account Name *", placeholder="e.g. Alice, Bob", key="new_acct_name")
-        a_tid = st.text_input("Telegram ID *", placeholder="e.g. 123456789", key="new_acct_tid")
-        a_city = st.text_input("Preferred City", value="Hong Kong", key="new_acct_city")
-
-        if st.button("Add Account", key="add_acct_btn"):
-            ok, msg = add_saved_account(
-                user["telegram_id"], a_name, a_tid, a_city,
-            )
-            if ok:
-                st.success(msg)
-                st.rerun()
-            else:
-                st.error(msg)
-
-    st.markdown("---")
-
-    # ---------- Quick switch to a saved account ----------
-    if saved:
-        st.subheader("🔄 Switch to Saved Account")
-        st.caption("Switch to a saved account. Both preferred city and Telegram ID will update across all pages.")
-
-        # Show current active sub-account
-        active_acct = st.session_state.get("active_account")
-        if active_acct:
-            st.info(f"Active: **{active_acct['name']}** — City: {active_acct['city']} — Telegram: `{active_acct['tid']}`")
-            if st.button("↩️ Back to My Account", key="reset_acct_btn"):
-                st.session_state.current_city = user.get("favorite_city") or "Hong Kong"
-                st.session_state.pop("active_account", None)
-                st.rerun()
-
-        acct_labels = [f"{a['account_name']} — {a['preferred_city']} — ID: {a['account_telegram_id']}" for a in saved]
-        selected_idx = st.selectbox("Select an account", range(len(acct_labels)),
-                                    format_func=lambda i: acct_labels[i],
-                                    key="quick_switch_select")
-
-        if st.button("🔄 Switch Account", type="primary", key="switch_acct_btn"):
-            chosen = saved[selected_idx]
-            st.session_state.current_city = chosen["preferred_city"]
-            st.session_state.active_account = {
-                "name": chosen["account_name"],
-                "tid": chosen["account_telegram_id"],
-                "city": chosen["preferred_city"],
-            }
-            st.success(f"Switched to **{chosen['account_name']}** — City: {chosen['preferred_city']}, Telegram: `{chosen['account_telegram_id']}`")
-            st.rerun()
 
 
 # ==================== Page Router ====================
