@@ -483,17 +483,6 @@ def show_account():
             st.success(f"Switched to **{chosen['account_name']}** — City: {chosen['preferred_city']}, Telegram: `{chosen['account_telegram_id']}`")
             st.rerun()
 
-    # ---------- Current info ----------
-    st.markdown("---")
-    st.subheader("Current Preferences")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.write(f"**Telegram ID:** {user['telegram_id']}")
-        st.write(f"**Nickname:** {user.get('nickname') or 'Not set'}")
-    with col2:
-        st.write(f"**Preferred City:** {user.get('favorite_city') or 'Hong Kong'}")
-        st.write(f"**Saved Accounts:** {len(saved)}")
-
 
 # ==================== Page Router ====================
 
