@@ -54,10 +54,6 @@ if st.session_state.logged_in_user:
     user = st.session_state.logged_in_user
     display_name = user.get("nickname") or user["telegram_id"]
     st.sidebar.success(f"👋 {display_name}")
-    # Show active sub-account if switched
-    active_acct = st.session_state.get("active_account")
-    if active_acct:
-        st.sidebar.info(f"📞 {active_acct['name']}\n🏙️ {active_acct['city']}")
     if st.sidebar.button("🚪 Logout"):
         st.session_state.logged_in_user = None
         st.session_state.pop("active_account", None)
