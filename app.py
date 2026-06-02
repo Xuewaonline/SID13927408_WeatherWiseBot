@@ -31,6 +31,16 @@ if "current_city" not in st.session_state:
 if "logged_in_user" not in st.session_state:
     st.session_state.logged_in_user = None
 
+# Auto-login from query params (survives page refresh)
+if st.session_state.logged_in_user is None:
+    saved_tid = st.query_params.get("login_tid")
+    if saved_tid:
+        user = get_user(saved_tid)
+        if user:
+            st.session_state.logged_in_user = user
+            if user.get("favorite_city"):
+                st.session_state.current_city = user["favorite_city"]
+
 # ==================== Sidebar ====================
 
 st.sidebar.markdown("<div style='margin-top: 2rem;'></div>", unsafe_allow_html=True)
@@ -46,6 +56,7 @@ if st.session_state.logged_in_user:
     st.sidebar.success(f"👋 {display_name}")
     if st.sidebar.button("🚪 Logout"):
         st.session_state.logged_in_user = None
+        st.query_params.pop("login_tid", None)
         st.rerun()
 else:
     with st.sidebar.expander("Login with Telegram ID"):
@@ -57,6 +68,7 @@ else:
                     st.session_state.logged_in_user = user
                     if user.get("favorite_city"):
                         st.session_state.current_city = user["favorite_city"]
+                    st.query_params["login_tid"] = user["telegram_id"]
                     st.rerun()
             else:
                 st.error("Please enter your Telegram ID")
