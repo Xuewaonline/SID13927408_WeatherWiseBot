@@ -54,8 +54,13 @@ if st.session_state.logged_in_user:
     user = st.session_state.logged_in_user
     display_name = user.get("nickname") or user["telegram_id"]
     st.sidebar.success(f"👋 {display_name}")
+    # Show active sub-account if switched
+    active_acct = st.session_state.get("active_account")
+    if active_acct:
+        st.sidebar.info(f"📞 {active_acct['name']}\n🏙️ {active_acct['city']}")
     if st.sidebar.button("🚪 Logout"):
         st.session_state.logged_in_user = None
+        st.session_state.pop("active_account", None)
         st.query_params.pop("login_tid", None)
         st.rerun()
 else:
@@ -162,10 +167,10 @@ def show_telegram_send():
     st.subheader("Send Weather Report via Telegram")
     st.caption("Powered by Telegram @weatherwise_yukibot")
 
-    # Auto-fill telegram ID if logged in or quick-switched
+    # Auto-fill telegram ID and city from switched sub-account
     default_chat_id = ""
-    if st.session_state.get("auto_fill_telegram_id"):
-        default_chat_id = st.session_state.auto_fill_telegram_id
+    if st.session_state.get("active_account"):
+        default_chat_id = st.session_state.active_account["tid"]
     elif st.session_state.logged_in_user:
         default_chat_id = st.session_state.logged_in_user["telegram_id"]
 
@@ -241,10 +246,10 @@ def show_trip_weather():
             key="trip_arr_time"
         )
 
-    # Auto-fill telegram ID if logged in or quick-switched
+    # Auto-fill telegram ID from switched sub-account
     default_trip_id = ""
-    if st.session_state.get("auto_fill_telegram_id"):
-        default_trip_id = st.session_state.auto_fill_telegram_id
+    if st.session_state.get("active_account"):
+        default_trip_id = st.session_state.active_account["tid"]
     elif st.session_state.logged_in_user:
         default_trip_id = st.session_state.logged_in_user["telegram_id"]
 
@@ -454,25 +459,33 @@ def show_account():
 
     # ---------- Quick switch to a saved account ----------
     if saved:
-        st.subheader("🔄 Quick Switch to Saved Account")
-        st.caption("Switch your default city to a saved account's preferred city.")
+        st.subheader("🔄 Switch to Saved Account")
+        st.caption("Switch to a saved account. Both preferred city and Telegram ID will update across all pages.")
 
-        acct_labels = [f"{a['account_name']} ({a['preferred_city']})" for a in saved]
+        # Show current active sub-account
+        active_acct = st.session_state.get("active_account")
+        if active_acct:
+            st.info(f"Active: **{active_acct['name']}** — City: {active_acct['city']} — Telegram: `{active_acct['tid']}`")
+            if st.button("↩️ Back to My Account", key="reset_acct_btn"):
+                st.session_state.current_city = user.get("favorite_city") or "Hong Kong"
+                st.session_state.pop("active_account", None)
+                st.rerun()
+
+        acct_labels = [f"{a['account_name']} — {a['preferred_city']} — ID: {a['account_telegram_id']}" for a in saved]
         selected_idx = st.selectbox("Select an account", range(len(acct_labels)),
                                     format_func=lambda i: acct_labels[i],
                                     key="quick_switch_select")
 
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("Apply Preferred City", key="apply_city_btn"):
-                chosen = saved[selected_idx]
-                st.session_state.current_city = chosen["preferred_city"]
-                st.success(f"Default city changed to **{chosen['preferred_city']}**")
-        with col2:
-            if st.button("Auto-fill Telegram ID", key="apply_tid_btn"):
-                chosen = saved[selected_idx]
-                st.session_state.auto_fill_telegram_id = chosen["account_telegram_id"]
-                st.success(f"Telegram ID set to `{chosen['account_telegram_id']}`")
+        if st.button("🔄 Switch Account", type="primary", key="switch_acct_btn"):
+            chosen = saved[selected_idx]
+            st.session_state.current_city = chosen["preferred_city"]
+            st.session_state.active_account = {
+                "name": chosen["account_name"],
+                "tid": chosen["account_telegram_id"],
+                "city": chosen["preferred_city"],
+            }
+            st.success(f"Switched to **{chosen['account_name']}** — City: {chosen['preferred_city']}, Telegram: `{chosen['account_telegram_id']}`")
+            st.rerun()
 
     # ---------- Current info ----------
     st.markdown("---")
