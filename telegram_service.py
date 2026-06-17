@@ -57,6 +57,50 @@ def send_telegram(chat_id, message):
         }
 
 
+def send_telegram_batch(chat_ids, message):
+    """
+    Send the same message to multiple Telegram chats.
+
+    Returns:
+        {
+            "success": int,     # number of successful sends
+            "failed": list[str],# per-recipient error descriptions
+            "total": int,       # unique recipients attempted
+            "demo": bool,       # True if bot token was not configured
+            "preview": str|None # one preview when in demo mode
+        }
+    """
+    success = 0
+    failed = []
+    demo = False
+    preview = None
+    seen = set()
+
+    for cid in chat_ids or []:
+        cid = (cid or "").strip()
+        if not cid or cid in seen:
+            continue
+        seen.add(cid)
+
+        result = send_telegram(cid, message)
+        if result.get("success"):
+            success += 1
+            if result.get("demo"):
+                demo = True
+                if preview is None:
+                    preview = result.get("preview")
+        else:
+            failed.append(f"{cid}: {result.get('message', 'unknown error')}")
+
+    return {
+        "success": success,
+        "failed": failed,
+        "total": len(seen),
+        "demo": demo,
+        "preview": preview,
+    }
+
+
 def build_weather_message(weather, forecast=None, alerts=None, rec=None, include_weather=True):
     """
     Build a weather report message from weather data.

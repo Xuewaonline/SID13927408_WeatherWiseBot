@@ -9,9 +9,14 @@ from datetime import datetime, timedelta
 # Import weather service and recommendation modules
 from weather_service import get_weather, get_forecast, check_bad_weather, get_weather_emoji
 from recommendation import get_clothing_recommendation, get_forecast_recommendation, format_recommendation_html
-from telegram_service import send_telegram, build_weather_message
+from telegram_service import send_telegram, send_telegram_batch, build_weather_message
 from trip_weatherpush_service import send_trip_weather_report
-from user_service import register_or_login, get_user, update_user
+from user_service import (
+    register_or_login, get_user, update_user,
+    create_group, list_groups, get_group, update_group, delete_group,
+    add_group_member, remove_group_member, list_group_members,
+    get_group_broadcast_targets,
+)
 
 # ==================== Page Setup ====================
 
@@ -50,18 +55,30 @@ st.sidebar.markdown("**👤 Account**")
 if st.session_state.logged_in_user:
     user = st.session_state.logged_in_user
     display_name = user.get("nickname") or user["telegram_id"]
-    st.sidebar.success(f"👋 {display_name}")
-    if st.sidebar.button("🚪 Logout"):
+    # Default: only the username is shown. Telegram ID is hidden inside an
+    # expander and only revealed when the user clicks their own name.
+    with st.sidebar.expander(f"👤 {display_name}"):
+        st.caption("Telegram ID (private — visible only to you):")
+        st.code(user["telegram_id"])
+    if st.sidebar.button("🚪 Logout", use_container_width=True):
         st.session_state.logged_in_user = None
         st.query_params.pop("login_tid", None)
         st.rerun()
 else:
     with st.sidebar.expander("Login with Telegram ID"):
         login_id = st.text_input("Telegram ID", key="login_telegram_id")
+        login_nick = st.text_input(
+            "Username (display name)",
+            key="login_telegram_nick",
+            help="Shown instead of your Telegram ID. You can change it later on the Account page.",
+        )
         if st.button("Login", key="login_btn"):
             if login_id.strip():
                 user = register_or_login(login_id)
                 if user:
+                    if login_nick.strip():
+                        update_user(login_id, nickname=login_nick.strip())
+                        user = get_user(login_id)
                     st.session_state.logged_in_user = user
                     if user.get("favorite_city"):
                         st.session_state.current_city = user["favorite_city"]
@@ -76,7 +93,7 @@ st.sidebar.markdown("<br><br>", unsafe_allow_html=True)
 if "nav_option" not in st.session_state:
     st.session_state.nav_option = "🏠 Home"
 
-nav_options = ["🏠 Home", "🌦️ Weather Query", "📱 Telegram Push", "🚗 Trip Weather Push", "👤 Account"]
+nav_options = ["🏠 Home", "🌦️ Weather Query", "📱 Telegram Push", "🚗 Trip Weather Push", "👥 Groups", "👤 Account"]
 
 for option in nav_options:
     if st.sidebar.button(option, use_container_width=True, 
@@ -84,7 +101,15 @@ for option in nav_options:
         st.session_state.nav_option = option
         st.rerun()
 
-page = st.session_state.nav_option.replace("🏠 ", "").replace("🌦️ ", "").replace("📱 ", "").replace("🚗 ", "").replace("👤 ", "")
+page = (
+    st.session_state.nav_option
+    .replace("🏠 ", "")
+    .replace("🌦️ ", "")
+    .replace("📱 ", "")
+    .replace("🚗 ", "")
+    .replace("👥 ", "")
+    .replace("👤 ", "")
+)
 
 # ==================== Home Page ====================
 
@@ -375,12 +400,24 @@ def show_account():
         return
 
     user = st.session_state.logged_in_user
-    st.success(f"Logged in as: **{user['telegram_id']}**")
+    display_name = user.get("nickname") or user["telegram_id"]
+    st.success(f"Logged in as: **{display_name}**")
 
     st.subheader("Profile Settings")
 
     current_nickname = user.get("nickname", "")
-    nickname = st.text_input("Nickname", value=current_nickname, key="account_nickname")
+    nickname = st.text_input(
+        "Username (display name)",
+        value=current_nickname,
+        key="account_nickname",
+        help="This name is shown across the app. Your Telegram ID stays private.",
+    )
+
+    # Telegram ID is masked by default; click to reveal.
+    st.markdown("**Telegram ID**")
+    with st.expander("🔑 Click to reveal Telegram ID"):
+        st.code(user["telegram_id"])
+        st.caption("Hidden by default for your privacy.")
 
     current_city = user.get("favorite_city", "Hong Kong")
     favorite_city = st.text_input("Preferred City", value=current_city, key="account_city")
@@ -398,6 +435,190 @@ def show_account():
         st.success("Saved!")
         st.rerun()
 
+    st.markdown("---")
+    st.subheader("Groups")
+    st.write("Manage contact groups for one-click batch weather push.")
+    if st.button("👥 Go to Groups Page"):
+        st.session_state.nav_option = "👥 Groups"
+        st.rerun()
+
+
+# ==================== Groups Page ====================
+
+def show_groups():
+    """Manage contact groups and broadcast weather to all members."""
+    st.title("👥 Groups")
+
+    if not st.session_state.logged_in_user:
+        st.info("Please login from the sidebar to manage groups.")
+        return
+
+    user = st.session_state.logged_in_user
+    owner_tid = user["telegram_id"]
+
+    # ---------- Create new group ----------
+    st.subheader("➕ Create New Group")
+    with st.form("create_group_form"):
+        c1, c2 = st.columns(2)
+        with c1:
+            new_name = st.text_input("Group Name *", key="new_group_name")
+        with c2:
+            new_city = st.text_input("City Preference", value="Hong Kong", key="new_group_city")
+        new_desc = st.text_input("Description (optional)", key="new_group_desc")
+        submitted = st.form_submit_button("Create Group", type="primary")
+        if submitted:
+            if not new_name.strip():
+                st.error("Please enter a group name.")
+            else:
+                gid = create_group(owner_tid, new_name, new_city, new_desc)
+                if gid:
+                    st.success(f"Group '{new_name.strip()}' created.")
+                    st.rerun()
+                else:
+                    st.error("Failed to create group. Please login again.")
+
+    st.markdown("---")
+
+    # ---------- List groups ----------
+    st.subheader("📋 My Groups")
+    groups = list_groups(owner_tid)
+
+    if not groups:
+        st.info("No groups yet. Create one above to start batch-pushing weather reports.")
+        return
+
+    for g in groups:
+        member_label = f"{g['member_count']} member" + ("s" if g['member_count'] != 1 else "")
+        header = f"📁 {g['name']}   •   📍 {g['city']}   •   👥 {member_label}"
+        with st.expander(header, expanded=False):
+
+            tab_members, tab_broadcast, tab_settings = st.tabs([
+                f"👥 Members ({g['member_count']})",
+                "📤 One-Click Broadcast",
+                "⚙️ Settings",
+            ])
+
+            # ----- Members tab -----
+            with tab_members:
+                members = list_group_members(g["id"])
+                if members:
+                    for m in members:
+                        mc1, mc2, mc3 = st.columns([3, 3, 1])
+                        mc1.write(m["display_name"] or "_(no name)_")
+                        mc2.code(m["telegram_id"])
+                        if mc3.button("❌", key=f"rm_{g['id']}_{m['telegram_id']}",
+                                      help="Remove member"):
+                            remove_group_member(g["id"], m["telegram_id"])
+                            st.success(f"Removed {m['telegram_id']}.")
+                            st.rerun()
+                else:
+                    st.caption("No members yet. Add Telegram IDs below.")
+
+                with st.form(f"add_member_form_{g['id']}"):
+                    am1, am2 = st.columns(2)
+                    new_m_name = am1.text_input(
+                        "Display Name (optional)",
+                        key=f"add_m_name_{g['id']}",
+                    )
+                    new_m_tid = am2.text_input(
+                        "Telegram ID *",
+                        key=f"add_m_tid_{g['id']}",
+                    )
+                    if st.form_submit_button("➕ Add Member"):
+                        if not new_m_tid.strip():
+                            st.error("Telegram ID is required.")
+                        else:
+                            ok = add_group_member(g["id"], new_m_tid, new_m_name)
+                            if ok:
+                                st.success(f"Added {new_m_tid.strip()} to {g['name']}.")
+                                st.rerun()
+                            else:
+                                st.warning("This Telegram ID is already in the group.")
+
+            # ----- Broadcast tab -----
+            with tab_broadcast:
+                st.markdown(
+                    f"**City:** {g['city']}   |   **Recipients:** {g['member_count']}"
+                )
+                bc1, bc2, bc3, bc4 = st.columns(4)
+                inc_weather = bc1.checkbox("Weather", True, key=f"bw_{g['id']}")
+                inc_forecast = bc2.checkbox("Forecast", True, key=f"bf_{g['id']}")
+                inc_outfit = bc3.checkbox("Outfit", True, key=f"bo_{g['id']}")
+                inc_alerts = bc4.checkbox("Alerts", True, key=f"ba_{g['id']}")
+
+                if st.button("📤 Send Weather to All Members",
+                             type="primary",
+                             key=f"broadcast_{g['id']}",
+                             use_container_width=True):
+                    if g["member_count"] == 0:
+                        st.error("This group has no members yet.")
+                    elif not any([inc_weather, inc_forecast, inc_outfit, inc_alerts]):
+                        st.warning("Please select at least one item to send.")
+                    else:
+                        weather = get_weather(g["city"])
+                        if weather is None:
+                            st.error(f"City '{g['city']}' not found.")
+                        else:
+                            forecast = get_forecast(g["city"]) if inc_forecast else []
+                            alerts = check_bad_weather(g["city"]) if inc_alerts else []
+                            rec = get_clothing_recommendation(weather) if inc_outfit else None
+                            message = build_weather_message(
+                                weather, forecast, alerts, rec, inc_weather
+                            )
+                            targets = get_group_broadcast_targets(g["id"])
+                            with st.spinner(f"Sending to {len(targets)} recipients..."):
+                                result = send_telegram_batch(targets, message)
+
+                            if result.get("demo"):
+                                st.info(
+                                    f"📝 Demo mode — preview for {result['success']} recipient(s):"
+                                )
+                                st.code(result.get("preview") or message)
+                            else:
+                                st.success(
+                                    f"✅ Sent to **{result['success']} / {result['total']}** "
+                                    f"member(s) of '{g['name']}'."
+                                )
+                            if result["failed"]:
+                                st.error(
+                                    f"❌ Failed for {len(result['failed'])} recipient(s):"
+                                )
+                                for fail in result["failed"]:
+                                    st.write(f"- {fail}")
+
+            # ----- Settings tab -----
+            with tab_settings:
+                with st.form(f"settings_form_{g['id']}"):
+                    s1, s2 = st.columns(2)
+                    edit_name = s1.text_input("Group Name", value=g["name"], key=f"gn_{g['id']}")
+                    edit_city = s2.text_input("City", value=g["city"], key=f"gc_{g['id']}")
+                    edit_desc = st.text_input(
+                        "Description",
+                        value=g.get("description", ""),
+                        key=f"gd_{g['id']}",
+                    )
+                    sc1, sc2 = st.columns(2)
+                    save_clicked = sc1.form_submit_button("💾 Save Changes")
+                    delete_clicked = sc2.form_submit_button("🗑️ Delete Group")
+
+                    if save_clicked:
+                        if not edit_name.strip():
+                            st.error("Group name cannot be empty.")
+                        else:
+                            update_group(
+                                g["id"],
+                                name=edit_name,
+                                city=edit_city,
+                                description=edit_desc,
+                            )
+                            st.success("Group updated.")
+                            st.rerun()
+
+                    if delete_clicked:
+                        delete_group(g["id"])
+                        st.success(f"Group '{g['name']}' deleted.")
+                        st.rerun()
+
 
 # ==================== Page Router ====================
 
@@ -409,6 +630,8 @@ elif page == "Telegram Push":
     show_telegram_send()
 elif page == "Trip Weather Push":
     show_trip_weather()
+elif page == "Groups":
+    show_groups()
 elif page == "Account":
     show_account()
 
