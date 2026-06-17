@@ -58,7 +58,6 @@ if st.session_state.logged_in_user:
     # Default: only the username is shown. Telegram ID is hidden inside an
     # expander and only revealed when the user clicks their own name.
     with st.sidebar.expander(f"👤 {display_name}"):
-        st.caption("Telegram ID (private — visible only to you):")
         st.code(user["telegram_id"])
     if st.sidebar.button("🚪 Logout", use_container_width=True):
         st.session_state.logged_in_user = None
@@ -93,7 +92,7 @@ st.sidebar.markdown("<br><br>", unsafe_allow_html=True)
 if "nav_option" not in st.session_state:
     st.session_state.nav_option = "🏠 Home"
 
-nav_options = ["🏠 Home", "🌦️ Weather Query", "📱 Telegram Push", "🚗 Trip Weather Push", "👥 Groups", "👤 Account"]
+nav_options = ["🏠 Home", "🌦️ Weather Query", "📱 Telegram Push", "🚗 Trip Weather Push", "👤 Account & Groups"]
 
 for option in nav_options:
     if st.sidebar.button(option, use_container_width=True, 
@@ -184,17 +183,31 @@ def show_telegram_send():
     st.subheader("Send Weather Report via Telegram")
     st.caption("Powered by Telegram @weatherwise_yukibot")
 
-    # Auto-fill telegram ID if logged in
-    default_chat_id = ""
-    if st.session_state.logged_in_user:
-        default_chat_id = st.session_state.logged_in_user["telegram_id"]
-
     col1, col2 = st.columns(2)
     with col1:
         city = st.text_input("City name", st.session_state.current_city, key="telegram_city")
     with col2:
-        chat_id = st.text_input("Telegram ID", default_chat_id, key="telegram_chat_id")
-    
+        # When logged in, default to "Me" — only the username is shown, the
+        # raw Telegram ID stays hidden. The TID input box only appears when the
+        # user explicitly switches to "Other" to send to a non-registered chat.
+        chat_id = ""
+        if st.session_state.logged_in_user:
+            current = st.session_state.logged_in_user
+            username = current.get("nickname") or "(no username set)"
+            send_choice = st.radio(
+                "Recipient",
+                options=["Me", "Other"],
+                horizontal=True,
+                key="telegram_recipient",
+            )
+            if send_choice == "Me":
+                chat_id = current["telegram_id"]
+                st.info(f"👤 {username}")
+            else:
+                chat_id = st.text_input("Telegram ID", "", key="telegram_chat_id_other")
+        else:
+            chat_id = st.text_input("Telegram ID", "", key="telegram_chat_id_anon")
+
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         include_weather = st.checkbox("Current weather", True)
@@ -204,29 +217,29 @@ def show_telegram_send():
         include_outfit = st.checkbox("Outfit tip", True)
     with col4:
         include_alerts = st.checkbox("Weather alerts", True)
-    
+
     if st.button("📤 Send Telegram", type="primary"):
         if not chat_id.strip():
             st.error("Please enter a Telegram ID.")
             return
-        
+
         weather = get_weather(city)
         if weather is None:
             st.error(f"City '{city}' not found.")
             return
-        
+
         forecast = get_forecast(city) if include_forecast else []
         alerts = check_bad_weather(city) if include_alerts else []
         rec = get_clothing_recommendation(weather) if include_outfit else None
-        
+
         if not include_weather and not include_forecast and not include_outfit and not include_alerts:
             st.warning("Please select at least one item to send.")
             return
-        
+
         # Build and send Telegram message
         message_text = build_weather_message(weather, forecast, alerts, rec, include_weather)
         result = send_telegram(chat_id, message_text)
-        
+
         if result["success"]:
             if result.get("demo"):
                 st.info(f"📝 {result['message']}")
@@ -389,21 +402,23 @@ def show_weather_query():
             st.line_chart(chart_data.set_index('Day'))
 
 
-# ==================== Account Page ====================
+# ==================== Account & Groups Page ====================
 
 def show_account():
-    """Display user account and preferences page."""
-    st.title("👤 My Account")
+    """Account profile + group management on a single page."""
+    st.title("👤 Account & Groups")
 
     if not st.session_state.logged_in_user:
-        st.info("Please login from the sidebar to manage your account.")
+        st.info("Please login from the sidebar to manage your account and groups.")
         return
 
     user = st.session_state.logged_in_user
+    owner_tid = user["telegram_id"]
     display_name = user.get("nickname") or user["telegram_id"]
     st.success(f"Logged in as: **{display_name}**")
 
-    st.subheader("Profile Settings")
+    # ---------- Profile ----------
+    st.subheader("👤 Profile Settings")
 
     current_nickname = user.get("nickname", "")
     nickname = st.text_input(
@@ -413,16 +428,10 @@ def show_account():
         help="This name is shown across the app. Your Telegram ID stays private.",
     )
 
-    # Telegram ID is masked by default; click to reveal.
-    st.markdown("**Telegram ID**")
-    with st.expander("🔑 Click to reveal Telegram ID"):
-        st.code(user["telegram_id"])
-        st.caption("Hidden by default for your privacy.")
-
     current_city = user.get("favorite_city", "Hong Kong")
     favorite_city = st.text_input("Preferred City", value=current_city, key="account_city")
 
-    if st.button("💾 Save", type="primary"):
+    if st.button("💾 Save Profile", type="primary"):
         update_user(
             user["telegram_id"],
             nickname=nickname.strip(),
@@ -432,32 +441,15 @@ def show_account():
         st.session_state.logged_in_user = updated
         if favorite_city.strip():
             st.session_state.current_city = favorite_city.strip()
-        st.success("Saved!")
+        st.success("Profile saved!")
         st.rerun()
 
+    # ---------- Groups ----------
     st.markdown("---")
-    st.subheader("Groups")
-    st.write("Manage contact groups for one-click batch weather push.")
-    if st.button("👥 Go to Groups Page"):
-        st.session_state.nav_option = "👥 Groups"
-        st.rerun()
+    st.subheader("👥 Groups")
+    st.caption("Define a city preference per group, then send weather to all members in one click.")
 
-
-# ==================== Groups Page ====================
-
-def show_groups():
-    """Manage contact groups and broadcast weather to all members."""
-    st.title("👥 Groups")
-
-    if not st.session_state.logged_in_user:
-        st.info("Please login from the sidebar to manage groups.")
-        return
-
-    user = st.session_state.logged_in_user
-    owner_tid = user["telegram_id"]
-
-    # ---------- Create new group ----------
-    st.subheader("➕ Create New Group")
+    st.markdown("##### ➕ Create New Group")
     with st.form("create_group_form"):
         c1, c2 = st.columns(2)
         with c1:
@@ -477,10 +469,7 @@ def show_groups():
                 else:
                     st.error("Failed to create group. Please login again.")
 
-    st.markdown("---")
-
-    # ---------- List groups ----------
-    st.subheader("📋 My Groups")
+    st.markdown("##### 📋 My Groups")
     groups = list_groups(owner_tid)
 
     if not groups:
@@ -630,9 +619,7 @@ elif page == "Telegram Push":
     show_telegram_send()
 elif page == "Trip Weather Push":
     show_trip_weather()
-elif page == "Groups":
-    show_groups()
-elif page == "Account":
+elif page == "Account & Groups":
     show_account()
 
 # Footer
