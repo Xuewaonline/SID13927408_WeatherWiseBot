@@ -483,7 +483,7 @@ def show_account():
 
             tab_members, tab_broadcast, tab_settings = st.tabs([
                 f"👥 Members ({g['member_count']})",
-                "📤 One-Click Broadcast",
+                "📤 Broadcast",
                 "⚙️ Settings",
             ])
 
