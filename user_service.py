@@ -137,17 +137,43 @@ def user_exists(telegram_id):
     return found
 
 
+def get_user_by_username(username):
+    """Return the user with the given username (nickname), or None.
+
+    Usernames are treated as unique at the application level — see
+    ``register_user`` which rejects duplicates. After registration the
+    Telegram ID is never asked for again; users login with just their username.
+    """
+    username = (username or "").strip()
+    if not username:
+        return None
+    conn = _get_conn()
+    c = conn.cursor()
+    c.execute("SELECT * FROM users WHERE nickname = ?", (username,))
+    row = c.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def username_exists(username):
+    """Return True if the username (nickname) is already taken."""
+    return get_user_by_username(username) is not None
+
+
 def register_user(telegram_id, nickname, favorite_city="Hong Kong"):
     """Register a brand-new user.
 
-    Both telegram_id and nickname are required. Returns the new user dict on
-    success, or None if validation fails or the telegram_id is already taken.
+    Both telegram_id and nickname are required, and both must be unique.
+    Returns the new user dict on success, or None if validation fails or
+    either value is already taken.
     """
     telegram_id = (telegram_id or "").strip()
     nickname = (nickname or "").strip()
     if not telegram_id or not nickname:
         return None
     if user_exists(telegram_id):
+        return None
+    if username_exists(nickname):
         return None
 
     favorite_city = (favorite_city or "").strip() or "Hong Kong"
@@ -198,13 +224,28 @@ def login_user(telegram_id):
     return get_user(telegram_id)
 
 
+def login_user_by_username(username):
+    """Login an existing user by username (nickname).
+
+    The primary login path: the Telegram ID is recorded once at registration
+    and never asked for again. Returns the refreshed user dict, or None if the
+    username is not registered.
+    """
+    user = get_user_by_username(username)
+    if not user:
+        return None
+    touch_login(user["telegram_id"])
+    return get_user_by_username(username)
+
+
 def register_or_login(telegram_id, nickname=None):
     """Login an existing user, or register a new one.
 
     - If the Telegram ID is already registered, returns the stored user.
     - If it is a new Telegram ID, a non-empty nickname is required to
       complete registration. Without a nickname the function returns None
-      so the caller can prompt the user for the missing username.
+      so the caller can prompt the user for the missing username. The
+      nickname must also not collide with an existing user's username.
     """
     telegram_id = (telegram_id or "").strip()
     if not telegram_id:

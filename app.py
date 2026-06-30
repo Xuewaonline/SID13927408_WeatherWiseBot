@@ -13,7 +13,8 @@ from recommendation import get_clothing_recommendation, get_forecast_recommendat
 from telegram_service import send_telegram, send_telegram_batch, build_weather_message
 from trip_weatherpush_service import send_trip_weather_report
 from user_service import (
-    register_user, login_user, user_exists,
+    register_user, login_user, login_user_by_username,
+    user_exists, username_exists,
     get_user, update_user,
     create_group, list_groups, get_group, update_group, delete_group,
     add_group_member, remove_group_member, list_group_members,
@@ -132,36 +133,67 @@ if st.session_state.logged_in_user:
         st.rerun()
 else:
     with st.sidebar.expander("🔑 Login / Register"):
-        login_id = st.text_input("Telegram ID *", key="login_telegram_id")
-        login_nick = st.text_input(
-            "Username *",
-            key="login_telegram_nick",
-            help="Required for new users. This name is shown across the app; "
-                 "your Telegram ID stays private.",
+        mode = st.radio(
+            "Mode",
+            options=["🔑 Login", "📝 Register"],
+            horizontal=True,
+            key="login_mode",
+            label_visibility="collapsed",
         )
-        if st.button("Login / Register", key="login_btn", type="primary"):
-            tid = login_id.strip()
-            nick = login_nick.strip()
-            if not tid:
-                st.error("Please enter your Telegram ID.")
-            elif user_exists(tid):
-                # Existing user → straight login, username is already on file.
-                user = login_user(tid)
-                if user:
-                    st.session_state.logged_in_user = user
-                    if user.get("favorite_city"):
-                        st.session_state.current_city = user["favorite_city"]
-                    st.query_params["login_tid"] = user["telegram_id"]
-                    # Always persist login so the next session restores automatically.
-                    save_login_to_browser(user["telegram_id"])
-                    st.toast(f"Welcome back, {user.get('nickname') or 'user'}!")
-                    st.rerun()
-            else:
-                # New user → username is required to register.
-                if not nick:
-                    st.error("New user — please enter a Username to register.")
+
+        if mode == "🔑 Login":
+            # Returning user — username only. The Telegram ID was recorded at
+            # registration time and is never asked for again.
+            login_username = st.text_input(
+                "Username",
+                key="login_username",
+                placeholder="Enter your username",
+            )
+            if st.button("Login", key="login_btn", type="primary",
+                         use_container_width=True):
+                uname = login_username.strip()
+                if not uname:
+                    st.error("Please enter your username.")
                 else:
-                    user = register_user(tid, nick)
+                    user = login_user_by_username(uname)
+                    if user:
+                        st.session_state.logged_in_user = user
+                        if user.get("favorite_city"):
+                            st.session_state.current_city = user["favorite_city"]
+                        st.query_params["login_tid"] = user["telegram_id"]
+                        save_login_to_browser(user["telegram_id"])
+                        st.toast(f"Welcome back, {user['nickname']}!")
+                        st.rerun()
+                    else:
+                        st.error(
+                            f"Username '{uname}' not found. "
+                            f"Switch to Register to create an account."
+                        )
+        else:
+            # New user — username + Telegram ID (recorded once).
+            reg_username = st.text_input(
+                "Username *",
+                key="reg_username",
+                help="Your login name. Must be unique. You'll use this to login next time.",
+            )
+            reg_tid = st.text_input(
+                "Telegram ID *",
+                key="reg_telegram_id",
+                help="Recorded ONCE so the bot knows where to send messages. "
+                     "You'll never need to type it again — login with your username.",
+            )
+            if st.button("Create Account", key="register_btn", type="primary",
+                         use_container_width=True):
+                uname = reg_username.strip()
+                tid = reg_tid.strip()
+                if not uname or not tid:
+                    st.error("Both username and Telegram ID are required.")
+                elif username_exists(uname):
+                    st.error(f"Username '{uname}' is taken. Please choose another.")
+                elif user_exists(tid):
+                    st.error("This Telegram ID is already registered. Login instead.")
+                else:
+                    user = register_user(tid, uname)
                     if user:
                         st.session_state.logged_in_user = user
                         st.query_params["login_tid"] = user["telegram_id"]
