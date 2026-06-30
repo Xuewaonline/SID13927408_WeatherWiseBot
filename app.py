@@ -62,7 +62,7 @@ if st.session_state.logged_in_user:
     # Default: only the username is shown. Telegram ID is hidden inside an
     # expander and only revealed when the user clicks their own name.
     with st.sidebar.expander(f"👤 {display_name}"):
-        st.caption("Your Telegram ID (kept private):")
+        st.caption("Your Telegram ID:")
         st.code(user["telegram_id"])
     if st.sidebar.button("🚪 Logout", use_container_width=True):
         st.session_state.logged_in_user = None
