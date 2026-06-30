@@ -10,6 +10,14 @@ Responsibilities:
 - Groups: each user can create contact groups (e.g. Family, Colleagues) with a
   preferred city. A group holds multiple Telegram IDs and supports one-click
   batch weather push to every member.
+
+Persistence:
+- All users / groups / members live in a local SQLite database (``users.db``
+  next to this module). The DB survives app restarts and Streamlit refreshes —
+  accounts and groups created in past sessions are permanently available.
+- The schema is versioned via SQLite ``PRAGMA user_version``. ``init_db`` runs
+  forward-only migrations so an existing DB is upgraded in place without losing
+  data. See ``_run_migrations``.
 """
 
 import sqlite3
@@ -17,6 +25,9 @@ import os
 from datetime import datetime
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "users.db")
+
+# Bump when the schema changes. Add a matching branch in _run_migrations.
+SCHEMA_VERSION = 2
 
 
 def _get_conn():
@@ -26,7 +37,32 @@ def _get_conn():
     return conn
 
 
+def _table_columns(c, table):
+    c.execute(f"PRAGMA table_info({table})")
+    return {row[1] for row in c.fetchall()}
+
+
+def _run_migrations(c):
+    """Forward-only schema migrations driven by PRAGMA user_version.
+
+    Each branch upgrades from version N to N+1 and must be idempotent so that
+    running it on an already-migrated DB is a no-op. Existing rows are never
+    dropped.
+    """
+    c.execute("PRAGMA user_version")
+    current = c.fetchone()[0]
+
+    if current < 2:
+        # v1 → v2: add last_login_at to track returning users.
+        if "last_login_at" not in _table_columns(c, "users"):
+            c.execute("ALTER TABLE users ADD COLUMN last_login_at TEXT")
+        current = 2
+
+    c.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+
 def init_db():
+    """Create tables if missing, then run migrations and create indexes."""
     conn = _get_conn()
     c = conn.cursor()
 
@@ -71,6 +107,15 @@ def init_db():
         )
     """)
 
+    # Bring an existing DB up to the current schema version.
+    _run_migrations(c)
+
+    # Indexes that speed up the common lookups (CREATE IF NOT EXISTS is a
+    # no-op when they already exist).
+    c.execute("CREATE INDEX IF NOT EXISTS idx_groups_owner_id ON groups(owner_id)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_group_members_group_id ON group_members(group_id)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_group_members_telegram_id ON group_members(telegram_id)")
+
     conn.commit()
     conn.close()
 
@@ -112,9 +157,9 @@ def register_user(telegram_id, nickname, favorite_city="Hong Kong"):
     c = conn.cursor()
     try:
         c.execute(
-            "INSERT INTO users (telegram_id, nickname, favorite_city, created_at) "
-            "VALUES (?, ?, ?, ?)",
-            (telegram_id, nickname, favorite_city, now),
+            "INSERT INTO users (telegram_id, nickname, favorite_city, created_at, last_login_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (telegram_id, nickname, favorite_city, now, now),
         )
         conn.commit()
         c.execute("SELECT * FROM users WHERE telegram_id = ?", (telegram_id,))
@@ -125,8 +170,31 @@ def register_user(telegram_id, nickname, favorite_city="Hong Kong"):
     return user
 
 
+def touch_login(telegram_id):
+    """Update last_login_at for a returning user. Safe to call on every login."""
+    telegram_id = (telegram_id or "").strip()
+    if not telegram_id:
+        return False
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = _get_conn()
+    c = conn.cursor()
+    c.execute("UPDATE users SET last_login_at = ? WHERE telegram_id = ?", (now, telegram_id))
+    conn.commit()
+    ok = c.rowcount > 0
+    conn.close()
+    return ok
+
+
 def login_user(telegram_id):
-    """Login an existing user by Telegram ID. Returns None if not registered."""
+    """Login an existing user by Telegram ID.
+
+    Updates ``last_login_at`` and returns the fresh user dict, or None if the
+    Telegram ID is not registered.
+    """
+    user = get_user(telegram_id)
+    if not user:
+        return None
+    touch_login(telegram_id)
     return get_user(telegram_id)
 
 
@@ -360,6 +428,71 @@ def get_group_broadcast_targets(group_id):
         if tid and tid not in seen:
             seen.append(tid)
     return seen
+
+
+# ============================================================
+# Diagnostics & backup
+# ============================================================
+
+def get_db_status():
+    """Return a snapshot of the database for the Account page.
+
+    Includes absolute path, schema version, and row counts. Used to make the
+    "your data really is persisted" guarantee visible in the UI.
+    """
+    conn = _get_conn()
+    c = conn.cursor()
+    c.execute("PRAGMA user_version")
+    version = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM users")
+    users_count = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM groups")
+    groups_count = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM group_members")
+    members_count = c.fetchone()[0]
+    conn.close()
+    return {
+        "path": os.path.abspath(DB_PATH),
+        "schema_version": version,
+        "expected_version": SCHEMA_VERSION,
+        "users_count": users_count,
+        "groups_count": groups_count,
+        "members_count": members_count,
+    }
+
+
+def export_user_data(telegram_id):
+    """Export a user's full data (profile + owned groups + members) as a dict.
+
+    Useful as a JSON backup the user can download from the Account page.
+    """
+    user = get_user(telegram_id)
+    if not user:
+        return None
+    groups = []
+    for g in list_groups(telegram_id):
+        members = list_group_members(g["id"])
+        groups.append({
+            "name": g["name"],
+            "city": g["city"],
+            "description": g.get("description", ""),
+            "created_at": g["created_at"],
+            "members": [
+                {"display_name": m.get("display_name", ""), "telegram_id": m["telegram_id"]}
+                for m in members
+            ],
+        })
+    return {
+        "profile": {
+            "telegram_id": user["telegram_id"],
+            "nickname": user.get("nickname", ""),
+            "favorite_city": user.get("favorite_city", "Hong Kong"),
+            "created_at": user.get("created_at"),
+            "last_login_at": user.get("last_login_at"),
+        },
+        "groups": groups,
+        "exported_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
 
 
 # Initialize DB on module import

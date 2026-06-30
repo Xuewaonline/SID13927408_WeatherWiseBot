@@ -4,6 +4,7 @@ WeatherWiseBot - Main Application
 """
 
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 from datetime import datetime, timedelta
 # Import weather service and recommendation modules
@@ -17,7 +18,58 @@ from user_service import (
     create_group, list_groups, get_group, update_group, delete_group,
     add_group_member, remove_group_member, list_group_members,
     get_group_broadcast_targets,
+    get_db_status, export_user_data,
 )
+
+# ==================== Persistent login helpers ====================
+# Cross-session login is persisted in the browser's localStorage (key:
+# WWB_LOGIN_TID). On app load, if the user is not logged in and there's no
+# ?login_tid= in the URL, a tiny JS snippet reads localStorage and redirects
+# back with ?login_tid=<stored> so the auto-login below picks it up.
+# This survives browser restarts and Streamlit cloud refreshes.
+
+_WWB_LS_KEY = "WWB_LOGIN_TID"
+
+_RESTORE_LOGIN_JS = f"""
+<script>
+(function() {{
+    try {{
+        const url = new URL(window.parent.location.href);
+        if (url.searchParams.get('login_tid')) return;
+        const tid = localStorage.getItem('{_WWB_LS_KEY}');
+        if (tid) {{
+            url.searchParams.set('login_tid', tid);
+            window.parent.location.replace(url.toString());
+        }}
+    }} catch (e) {{
+        console.warn('WWB login restore failed:', e);
+    }}
+}})();
+</script>
+"""
+
+
+def save_login_to_browser(telegram_id):
+    """Persist telegram_id in localStorage so the next session restores login."""
+    safe = (telegram_id or "").replace("'", "\\'")
+    components.html(
+        f"<script>localStorage.setItem('{_WWB_LS_KEY}', '{safe}');</script>",
+        height=0,
+    )
+
+
+def clear_login_from_browser():
+    """Remove persisted login from localStorage on logout."""
+    components.html(
+        f"<script>localStorage.removeItem('{_WWB_LS_KEY}');</script>",
+        height=0,
+    )
+
+
+def restore_login_from_browser():
+    """Inject JS that redirects with login_tid if localStorage has a saved TID."""
+    components.html(_RESTORE_LOGIN_JS, height=0)
+
 
 # ==================== Page Setup ====================
 
@@ -34,15 +86,20 @@ if "current_city" not in st.session_state:
 if "logged_in_user" not in st.session_state:
     st.session_state.logged_in_user = None
 
-# Auto-login from query params (survives page refresh)
+# Auto-login: prefer URL ?login_tid= (set by localStorage restore or a bookmark),
+# then fall back to the in-session user. The localStorage restore only runs
+# once per session to avoid redirect loops.
 if st.session_state.logged_in_user is None:
     saved_tid = st.query_params.get("login_tid")
     if saved_tid:
-        user = get_user(saved_tid)
+        user = login_user(saved_tid)  # refreshes last_login_at too
         if user:
             st.session_state.logged_in_user = user
             if user.get("favorite_city"):
                 st.session_state.current_city = user["favorite_city"]
+    elif not st.session_state.get("_login_restore_attempted"):
+        st.session_state["_login_restore_attempted"] = True
+        restore_login_from_browser()
 
 # ==================== Sidebar ====================
 
@@ -62,10 +119,15 @@ if st.session_state.logged_in_user:
     # Default: only the username is shown. Telegram ID is hidden inside an
     # expander and only revealed when the user clicks their own name.
     with st.sidebar.expander(f"👤 {display_name}"):
-        st.caption("Your Telegram ID:")
+        st.caption("Your Telegram ID (kept private):")
         st.code(user["telegram_id"])
+        if user.get("last_login_at"):
+            st.caption(f"Last login: {user['last_login_at']}")
     if st.sidebar.button("🚪 Logout", use_container_width=True):
+        # Clear all persistent-login state so this device forgets the session.
+        clear_login_from_browser()
         st.session_state.logged_in_user = None
+        st.session_state.pop("_login_restore_attempted", None)
         st.query_params.pop("login_tid", None)
         st.rerun()
 else:
@@ -76,6 +138,13 @@ else:
             key="login_telegram_nick",
             help="Required for new users. This name is shown across the app; "
                  "your Telegram ID stays private.",
+        )
+        remember_me = st.checkbox(
+            "Remember me on this device",
+            value=True,
+            key="login_remember",
+            help="Keeps you logged in after you close the browser. "
+                 "Uncheck for shared devices. Logout always clears this.",
         )
         if st.button("Login / Register", key="login_btn", type="primary"):
             tid = login_id.strip()
@@ -90,6 +159,8 @@ else:
                     if user.get("favorite_city"):
                         st.session_state.current_city = user["favorite_city"]
                     st.query_params["login_tid"] = user["telegram_id"]
+                    if remember_me:
+                        save_login_to_browser(user["telegram_id"])
                     st.toast(f"Welcome back, {user.get('nickname') or 'user'}!")
                     st.rerun()
             else:
@@ -101,6 +172,8 @@ else:
                     if user:
                         st.session_state.logged_in_user = user
                         st.query_params["login_tid"] = user["telegram_id"]
+                        if remember_me:
+                            save_login_to_browser(user["telegram_id"])
                         st.toast(f"Account created. Welcome, {user['nickname']}!")
                         st.rerun()
                     else:
@@ -434,8 +507,40 @@ def show_account():
 
     user = st.session_state.logged_in_user
     owner_tid = user["telegram_id"]
-    display_name = user.get("nickname") or user["telegram_id"]
+    display_name = (user.get("nickname") or "").strip() or "(no username set)"
     st.success(f"Logged in as: **{display_name}**")
+
+    # ---------- Account summary (proves the data really is persisted) ----------
+    with st.container(border=True):
+        sc1, sc2, sc3 = st.columns(3)
+        with sc1:
+            st.metric("Member since", user.get("created_at", "—"))
+        with sc2:
+            st.metric("Last login", user.get("last_login_at") or "—")
+        with sc3:
+            st.metric("Your groups", len(list_groups(owner_tid)))
+
+        with st.expander("🗄️ Database status (your data is saved here)"):
+            db = get_db_status()
+            st.caption(
+                f"Stored in a local SQLite database. Schema version "
+                f"**v{db['schema_version']}** (expected v{db['expected_version']})."
+            )
+            st.code(db["path"], language="text")
+            dc1, dc2, dc3 = st.columns(3)
+            dc1.metric("Registered users", db["users_count"])
+            dc2.metric("Groups total", db["groups_count"])
+            dc3.metric("Group members", db["members_count"])
+
+            backup = export_user_data(owner_tid)
+            import json as _json
+            st.download_button(
+                "📥 Download my data (JSON backup)",
+                data=_json.dumps(backup, indent=2, ensure_ascii=False),
+                file_name=f"weatherwise_{owner_tid}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                mime="application/json",
+                help="Exports your profile + all your groups and members as a JSON file.",
+            )
 
     # ---------- Profile ----------
     st.subheader("👤 Profile Settings")
