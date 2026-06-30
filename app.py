@@ -23,10 +23,12 @@ from user_service import (
 
 # ==================== Persistent login helpers ====================
 # Cross-session login is persisted in the browser's localStorage (key:
-# WWB_LOGIN_TID). On app load, if the user is not logged in and there's no
-# ?login_tid= in the URL, a tiny JS snippet reads localStorage and redirects
-# back with ?login_tid=<stored> so the auto-login below picks it up.
-# This survives browser restarts and Streamlit cloud refreshes.
+# WWB_LOGIN_TID). Every successful login writes the telegram_id to
+# localStorage; on the next session start, if the user is not logged in and
+# there's no ?login_tid= in the URL, a tiny JS snippet reads localStorage and
+# redirects back with ?login_tid=<stored> so the auto-login below picks it up.
+# This survives browser restarts and Streamlit refreshes. Logout clears the
+# stored value so the device forgets the session.
 
 _WWB_LS_KEY = "WWB_LOGIN_TID"
 
@@ -119,10 +121,8 @@ if st.session_state.logged_in_user:
     # Default: only the username is shown. Telegram ID is hidden inside an
     # expander and only revealed when the user clicks their own name.
     with st.sidebar.expander(f"👤 {display_name}"):
-        st.caption("Your Telegram ID (kept private):")
+        st.caption("Your Telegram ID:")
         st.code(user["telegram_id"])
-        if user.get("last_login_at"):
-            st.caption(f"Last login: {user['last_login_at']}")
     if st.sidebar.button("🚪 Logout", use_container_width=True):
         # Clear all persistent-login state so this device forgets the session.
         clear_login_from_browser()
@@ -139,13 +139,6 @@ else:
             help="Required for new users. This name is shown across the app; "
                  "your Telegram ID stays private.",
         )
-        remember_me = st.checkbox(
-            "Remember me on this device",
-            value=True,
-            key="login_remember",
-            help="Keeps you logged in after you close the browser. "
-                 "Uncheck for shared devices. Logout always clears this.",
-        )
         if st.button("Login / Register", key="login_btn", type="primary"):
             tid = login_id.strip()
             nick = login_nick.strip()
@@ -159,8 +152,8 @@ else:
                     if user.get("favorite_city"):
                         st.session_state.current_city = user["favorite_city"]
                     st.query_params["login_tid"] = user["telegram_id"]
-                    if remember_me:
-                        save_login_to_browser(user["telegram_id"])
+                    # Always persist login so the next session restores automatically.
+                    save_login_to_browser(user["telegram_id"])
                     st.toast(f"Welcome back, {user.get('nickname') or 'user'}!")
                     st.rerun()
             else:
@@ -172,8 +165,7 @@ else:
                     if user:
                         st.session_state.logged_in_user = user
                         st.query_params["login_tid"] = user["telegram_id"]
-                        if remember_me:
-                            save_login_to_browser(user["telegram_id"])
+                        save_login_to_browser(user["telegram_id"])
                         st.toast(f"Account created. Welcome, {user['nickname']}!")
                         st.rerun()
                     else:
