@@ -2,9 +2,11 @@
 User Service Module
 
 Responsibilities:
-- Users: Telegram ID login + display username (nickname). The nickname is the
-  default identifier in the UI; the raw Telegram ID is treated as private and
-  only revealed on demand (see app.py sidebar / Account page).
+- Users: register with a username (display name) + Telegram ID. The username
+  is the public identifier shown across the UI; the raw Telegram ID is treated
+  as private and is only revealed on demand (see app.py sidebar / Account page).
+  New registrations require a non-empty username — login-only flow never
+  exposes the Telegram ID directly.
 - Groups: each user can create contact groups (e.g. Family, Colleagues) with a
   preferred city. A group holds multiple Telegram IDs and supports one-click
   batch weather push to every member.
@@ -24,28 +26,26 @@ def _get_conn():
     return conn
 
 
-def _column_exists(c, table, column):
-    c.execute(f"PRAGMA table_info({table})")
-    return any(row[1] == column for row in c.fetchall())
-
-
 def init_db():
     conn = _get_conn()
     c = conn.cursor()
 
-    # ----- users (existing) -----
+    # ----- users -----
+    # nickname is the public display name and is required at registration time
+    # (enforced in application code so existing rows with empty nicknames are
+    # not broken by a schema change). telegram_id is private — the UI never
+    # shows it without an explicit click.
     c.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             telegram_id TEXT UNIQUE NOT NULL,
-            nickname TEXT DEFAULT '',
+            nickname TEXT NOT NULL DEFAULT '',
             favorite_city TEXT DEFAULT 'Hong Kong',
             created_at TEXT NOT NULL
         )
     """)
 
-    # ----- groups (new) -----
-    # Each group has a preferred city and belongs to one user (owner).
+    # ----- groups -----
     c.execute("""
         CREATE TABLE IF NOT EXISTS groups (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -58,9 +58,7 @@ def init_db():
         )
     """)
 
-    # ----- group_members (new) -----
-    # Members are stored by Telegram ID directly so that recipients do not need
-    # to register themselves. (group_id, telegram_id) is unique to avoid dupes.
+    # ----- group_members -----
     c.execute("""
         CREATE TABLE IF NOT EXISTS group_members (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -81,31 +79,77 @@ def init_db():
 # User functions
 # ============================================================
 
-def register_or_login(telegram_id):
-    telegram_id = telegram_id.strip()
+def user_exists(telegram_id):
+    """Return True if the Telegram ID is already registered."""
+    telegram_id = (telegram_id or "").strip()
     if not telegram_id:
+        return False
+    conn = _get_conn()
+    c = conn.cursor()
+    c.execute("SELECT 1 FROM users WHERE telegram_id = ?", (telegram_id,))
+    found = c.fetchone() is not None
+    conn.close()
+    return found
+
+
+def register_user(telegram_id, nickname, favorite_city="Hong Kong"):
+    """Register a brand-new user.
+
+    Both telegram_id and nickname are required. Returns the new user dict on
+    success, or None if validation fails or the telegram_id is already taken.
+    """
+    telegram_id = (telegram_id or "").strip()
+    nickname = (nickname or "").strip()
+    if not telegram_id or not nickname:
         return None
+    if user_exists(telegram_id):
+        return None
+
+    favorite_city = (favorite_city or "").strip() or "Hong Kong"
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     conn = _get_conn()
     c = conn.cursor()
-
-    c.execute("SELECT * FROM users WHERE telegram_id = ?", (telegram_id,))
-    row = c.fetchone()
-
-    if row:
-        user = dict(row)
-    else:
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
         c.execute(
-            "INSERT INTO users (telegram_id, nickname, favorite_city, created_at) VALUES (?, ?, ?, ?)",
-            (telegram_id, "", "Hong Kong", now),
+            "INSERT INTO users (telegram_id, nickname, favorite_city, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            (telegram_id, nickname, favorite_city, now),
         )
         conn.commit()
         c.execute("SELECT * FROM users WHERE telegram_id = ?", (telegram_id,))
         user = dict(c.fetchone())
-
+    except sqlite3.IntegrityError:
+        user = None
     conn.close()
     return user
+
+
+def login_user(telegram_id):
+    """Login an existing user by Telegram ID. Returns None if not registered."""
+    return get_user(telegram_id)
+
+
+def register_or_login(telegram_id, nickname=None):
+    """Login an existing user, or register a new one.
+
+    - If the Telegram ID is already registered, returns the stored user.
+    - If it is a new Telegram ID, a non-empty nickname is required to
+      complete registration. Without a nickname the function returns None
+      so the caller can prompt the user for the missing username.
+    """
+    telegram_id = (telegram_id or "").strip()
+    if not telegram_id:
+        return None
+
+    existing = get_user(telegram_id)
+    if existing:
+        return existing
+
+    if not nickname or not nickname.strip():
+        return None
+
+    return register_user(telegram_id, nickname.strip())
 
 
 def get_user(telegram_id):
@@ -121,6 +165,13 @@ def update_user(telegram_id, **kwargs):
     telegram_id = telegram_id.strip()
     allowed = {"nickname", "favorite_city"}
     updates = {k: v for k, v in kwargs.items() if k in allowed}
+    # Nickname is the public identifier — never allow it to be cleared.
+    if "nickname" in updates:
+        nick = (updates["nickname"] or "").strip()
+        if not nick:
+            del updates["nickname"]
+        else:
+            updates["nickname"] = nick
     if not updates:
         return False
 

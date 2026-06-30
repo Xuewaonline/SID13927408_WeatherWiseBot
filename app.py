@@ -12,7 +12,8 @@ from recommendation import get_clothing_recommendation, get_forecast_recommendat
 from telegram_service import send_telegram, send_telegram_batch, build_weather_message
 from trip_weatherpush_service import send_trip_weather_report
 from user_service import (
-    register_or_login, get_user, update_user,
+    register_user, login_user, user_exists,
+    get_user, update_user,
     create_group, list_groups, get_group, update_group, delete_group,
     add_group_member, remove_group_member, list_group_members,
     get_group_broadcast_targets,
@@ -54,37 +55,56 @@ st.sidebar.markdown("**👤 Account**")
 
 if st.session_state.logged_in_user:
     user = st.session_state.logged_in_user
-    display_name = user.get("nickname") or user["telegram_id"]
+    # Username is always the public identifier. Never fall back to the raw
+    # Telegram ID here — legacy rows without a nickname show a safe placeholder
+    # and the real Telegram ID stays hidden inside the expander.
+    display_name = (user.get("nickname") or "").strip() or "(no username set)"
     # Default: only the username is shown. Telegram ID is hidden inside an
     # expander and only revealed when the user clicks their own name.
     with st.sidebar.expander(f"👤 {display_name}"):
+        st.caption("Your Telegram ID (kept private):")
         st.code(user["telegram_id"])
     if st.sidebar.button("🚪 Logout", use_container_width=True):
         st.session_state.logged_in_user = None
         st.query_params.pop("login_tid", None)
         st.rerun()
 else:
-    with st.sidebar.expander("Login with Telegram ID"):
-        login_id = st.text_input("Telegram ID", key="login_telegram_id")
+    with st.sidebar.expander("🔑 Login / Register"):
+        login_id = st.text_input("Telegram ID *", key="login_telegram_id")
         login_nick = st.text_input(
-            "Username (display name)",
+            "Username *",
             key="login_telegram_nick",
-            help="Shown instead of your Telegram ID. You can change it later on the Account page.",
+            help="Required for new users. This name is shown across the app; "
+                 "your Telegram ID stays private.",
         )
-        if st.button("Login", key="login_btn"):
-            if login_id.strip():
-                user = register_or_login(login_id)
+        if st.button("Login / Register", key="login_btn", type="primary"):
+            tid = login_id.strip()
+            nick = login_nick.strip()
+            if not tid:
+                st.error("Please enter your Telegram ID.")
+            elif user_exists(tid):
+                # Existing user → straight login, username is already on file.
+                user = login_user(tid)
                 if user:
-                    if login_nick.strip():
-                        update_user(login_id, nickname=login_nick.strip())
-                        user = get_user(login_id)
                     st.session_state.logged_in_user = user
                     if user.get("favorite_city"):
                         st.session_state.current_city = user["favorite_city"]
                     st.query_params["login_tid"] = user["telegram_id"]
+                    st.toast(f"Welcome back, {user.get('nickname') or 'user'}!")
                     st.rerun()
             else:
-                st.error("Please enter your Telegram ID")
+                # New user → username is required to register.
+                if not nick:
+                    st.error("New user — please enter a Username to register.")
+                else:
+                    user = register_user(tid, nick)
+                    if user:
+                        st.session_state.logged_in_user = user
+                        st.query_params["login_tid"] = user["telegram_id"]
+                        st.toast(f"Account created. Welcome, {user['nickname']}!")
+                        st.rerun()
+                    else:
+                        st.error("Registration failed. Please try again.")
 
 # Navigation menu with emojis and larger font
 st.sidebar.markdown("<br><br>", unsafe_allow_html=True)
